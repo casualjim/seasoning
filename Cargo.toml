@@ -2,6 +2,13 @@
 name = "seasoning"
 version = "0.1.0"
 edition = "2024"
+description = "Embedding and reranking infrastructure with rate limiting and retry logic"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/casualjim/seasoning"
+documentation = "https://docs.rs/seasoning"
+readme = "README.md"
+keywords = ["embedding", "reranking", "ai", "llm", "search"]
+categories = ["api-bindings", "web-programming"]
 
 [dependencies]
 async-trait = "0.1"
