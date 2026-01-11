@@ -1,0 +1,17 @@
+[settings]
+experimental = true
+
+[tools]
+"aqua:nextest-rs/nextest/cargo-nextest" = "latest"
+"cargo:cargo-release" = "latest"
+"cargo:samply" = "latest"
+hk = "latest"
+pkl = "latest"
+rust = "latest"
+
+[env]
+_.file = ".env.json"
+EMBEDDER_API_KEY = "{{ env.DEEPINFRA_API_KEY }}"
+
+[tasks.test]
+run = "cargo test --all"

@@ -1,0 +1,10 @@
+/target
+node_modules
+.codex/config.toml
+*.log
+.codex/sessions
+.codex/*.jsonl
+.codex/auth.json
+.env.json
+.vscode
+.config/crumbs/*.db

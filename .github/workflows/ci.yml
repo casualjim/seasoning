@@ -1,0 +1,39 @@
+name: CI Build and Publish
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup build environment
+        uses: ./.github/actions/setup-env
+        env:
+          MISE_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_REGISTRY_TOKEN: "Bearer ${{ secrets.CARGO_REGISTRY_TOKEN }}"
+
+      - name: Run tests
+        env:
+          CARGO_REGISTRY_TOKEN: "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+        run: |
+          cargo nextest run --all-features --no-tests pass
+
+      - name: Publish to Cargo Registry
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          CARGO_REGISTRY_TOKEN: "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+        run: |
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          cargo release patch --execute --no-confirm --all-features
