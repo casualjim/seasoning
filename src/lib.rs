@@ -23,7 +23,7 @@
 //!     Client as EmbedClient, EmbedderConfig, EmbeddingInput, ProviderDialect,
 //! };
 //!
-//! # async fn example() -> eyre::Result<()> {
+//! # async fn example() -> seasoning::Result<()> {
 //! let embedder = EmbedClient::new(EmbedderConfig {
 //!     api_key: Some(SecretString::from("YOUR_API_KEY")),
 //!     base_url: "https://api.deepinfra.com/v1/openai".to_string(),
@@ -56,7 +56,7 @@
 //! use seasoning::embedding::ProviderDialect;
 //! use seasoning::reranker::{Client as RerankerClient, RerankerConfig};
 //!
-//! # async fn example() -> eyre::Result<()> {
+//! # async fn example() -> seasoning::Result<()> {
 //! let reranker = RerankerClient::new(RerankerConfig {
 //!     api_key: Some(SecretString::from("YOUR_API_KEY")),
 //!     base_url: "https://api.deepinfra.com/v1".to_string(),
@@ -64,10 +64,26 @@
 //!     dialect: ProviderDialect::DeepInfra,
 //!     model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
 //!     instruction: None,
+//!     requests_per_minute: 1000,
+//!     max_concurrent_requests: 50,
+//!     tokens_per_minute: 1_000_000,
 //! })?;
 //!
-//! let docs = vec!["first doc".to_string(), "second doc".to_string()];
-//! let scores = reranker.rerank("search query", &docs).await?;
+//! let query = seasoning::RerankQuery {
+//!     text: "search query".to_string(),
+//!     token_count: 2,
+//! };
+//! let docs = vec![
+//!     seasoning::RerankDocument {
+//!         text: "first doc".to_string(),
+//!         token_count: 2,
+//!     },
+//!     seasoning::RerankDocument {
+//!         text: "second doc".to_string(),
+//!         token_count: 2,
+//!     },
+//! ];
+//! let scores = reranker.rerank(&query, &docs).await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -78,9 +94,18 @@
 //! - [`reranker`] - Document reranking based on query relevance
 //! - Configuration types re-exported from the private `config` module
 
+mod api;
+pub mod batching;
 mod config;
 pub mod embedding;
+mod error;
 mod reqwestx;
 pub mod reranker;
+pub mod service;
 
+pub use api::{
+    AddDecision, BatchItem, BatchingStrategy, EmbedOutput, EmbeddingInput, EmbeddingProvider,
+    RerankDocument, RerankQuery, RerankingProvider,
+};
 pub use config::*;
+pub use error::{Error, Result};

@@ -21,10 +21,10 @@
 //! use std::time::Duration;
 //! use secrecy::SecretString;
 //! use seasoning::embedding::{
-//!     Client, EmbedderConfig, EmbeddingInput, ProviderDialect, EmbeddingProvider,
+//!     Client, EmbedderConfig, EmbeddingInput, ProviderDialect,
 //! };
 //!
-//! # async fn example() -> eyre::Result<()> {
+//! # async fn example() -> seasoning::Result<()> {
 //! // Configure the embedding client
 //! let embedder = Client::new(EmbedderConfig {
 //!     api_key: Some(SecretString::from("your-api-key")),
@@ -60,13 +60,15 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use eyre::Result;
 use secrecy::SecretString;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use tracing::debug;
 
+use crate::EmbeddingProvider;
+use crate::Result;
 use crate::reqwestx::{ApiClient, ApiClientConfig};
+pub use crate::{EmbedOutput, EmbeddingInput};
 
 /// Provider dialect for embedding API compatibility.
 ///
@@ -144,110 +146,6 @@ pub struct EmbedderConfig {
     pub tokens_per_minute: u32,
 }
 
-/// Input for a single embedding request.
-///
-/// Each input consists of the text to embed and a pre-calculated token count.
-/// The token count is used for rate limiting purposes.
-///
-/// # Token Count
-///
-/// The `token_count` field must be provided by the caller. This allows the
-/// rate limiter to properly budget token usage before making API calls.
-/// Use a tokenizer appropriate for your model to calculate this value.
-///
-/// # Example
-///
-/// ```rust
-/// use seasoning::embedding::EmbeddingInput;
-///
-/// let input = EmbeddingInput {
-///     text: "hello world".to_string(),
-///     token_count: 2, // Pre-calculated using a tokenizer
-/// };
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EmbeddingInput {
-    /// The text to generate embeddings for
-    pub text: String,
-    /// Pre-calculated token count for rate limiting
-    pub token_count: usize,
-}
-
-/// Output from an embedding request.
-///
-/// Contains the generated embedding vectors, one per input.
-/// The embeddings are returned in the same order as the input texts.
-///
-/// # Example
-///
-/// ```rust
-/// use seasoning::embedding::EmbedOutput;
-///
-/// let output = EmbedOutput {
-///     embeddings: vec![
-///         vec![0.1, 0.2, 0.3], // First input's embedding
-///         vec![0.4, 0.5, 0.6], // Second input's embedding
-///     ],
-/// };
-///
-/// assert_eq!(output.embeddings.len(), 2);
-/// assert_eq!(output.embeddings[0].len(), 3); // Embedding dimension
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EmbedOutput {
-    /// Generated embedding vectors, one per input text
-    pub embeddings: Vec<Vec<f32>>,
-}
-
-/// Trait for embedding providers.
-///
-/// This trait abstracts over different embedding implementations,
-/// allowing for easy testing and provider swapping.
-///
-/// # Example Implementation
-///
-/// ```rust,no_run
-/// use async_trait::async_trait;
-/// use eyre::Result;
-/// use seasoning::embedding::{EmbeddingProvider, EmbeddingInput, EmbedOutput};
-///
-/// struct MockEmbedder;
-///
-/// #[async_trait]
-/// impl EmbeddingProvider for MockEmbedder {
-///     async fn embed(&self, input: &[EmbeddingInput]) -> Result<EmbedOutput> {
-///         // Generate mock embeddings
-///         let embeddings = input.iter()
-///             .map(|_| vec![0.0; 1024])
-///             .collect();
-///         Ok(EmbedOutput { embeddings })
-///     }
-/// }
-/// ```
-#[async_trait]
-pub trait EmbeddingProvider: Send + Sync {
-    /// Generate embeddings for the given inputs.
-    ///
-    /// # Arguments
-    ///
-    /// * `input` - Slice of embedding inputs containing text and token counts
-    ///
-    /// # Returns
-    ///
-    /// Returns an [`EmbedOutput`] containing the generated embedding vectors.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The API request fails
-    /// - Rate limits are exceeded and retries are exhausted
-    /// - The response cannot be parsed
-    /// - Network errors occur
-    async fn embed(&self, input: &[EmbeddingInput]) -> Result<EmbedOutput>;
-}
-
 /// Embedding client with rate limiting and retry logic.
 ///
 /// The client handles batched embedding requests with automatic rate limiting,
@@ -273,7 +171,7 @@ pub trait EmbeddingProvider: Send + Sync {
 /// use secrecy::SecretString;
 /// use seasoning::embedding::{Client, EmbedderConfig, ProviderDialect};
 ///
-/// # fn example() -> eyre::Result<()> {
+/// # fn example() -> seasoning::Result<()> {
 /// let client = Client::new(EmbedderConfig {
 ///     api_key: Some(SecretString::from("your-api-key")),
 ///     base_url: "https://api.deepinfra.com/v1/openai".to_string(),
@@ -320,7 +218,7 @@ impl Client {
     /// use secrecy::SecretString;
     /// use seasoning::embedding::{Client, EmbedderConfig, ProviderDialect};
     ///
-    /// # fn example() -> eyre::Result<()> {
+    /// # fn example() -> seasoning::Result<()> {
     /// let client = Client::new(EmbedderConfig {
     ///     api_key: Some(SecretString::from("your-api-key")),
     ///     base_url: "https://api.deepinfra.com/v1/openai".to_string(),
@@ -369,12 +267,12 @@ impl Client {
     }
 
     /// Extract text strings from embedding inputs for the API request.
-    fn prepare_inputs(&self, input: &[EmbeddingInput]) -> Result<Vec<String>> {
+    fn prepare_inputs(&self, input: &[EmbeddingInput]) -> Vec<String> {
         let mut batch_texts = Vec::with_capacity(input.len());
         for inp in input {
             batch_texts.push(inp.text.clone());
         }
-        Ok(batch_texts)
+        batch_texts
     }
 }
 
@@ -400,7 +298,7 @@ struct EmbedApiResponse {
 impl EmbeddingProvider for Client {
     async fn embed(&self, input: &[EmbeddingInput]) -> Result<EmbedOutput> {
         debug!("Embedding input batch_size: {}", input.len());
-        let batch_texts = self.prepare_inputs(input)?;
+        let batch_texts = self.prepare_inputs(input);
         let estimated_tokens = self.estimate_token_count(input);
 
         let payload = match self.dialect {

@@ -30,7 +30,7 @@ use seasoning::embedding::{
 };
 
 #[tokio::main]
-async fn main() -> eyre::Result<()> {
+async fn main() -> seasoning::Result<()> {
     let embedder = EmbedClient::new(EmbedderConfig {
         api_key: Some(SecretString::from("YOUR_API_KEY")),
         base_url: "https://api.deepinfra.com/v1/openai".to_string(),
@@ -72,10 +72,11 @@ use std::time::Duration;
 
 use secrecy::SecretString;
 use seasoning::embedding::ProviderDialect;
-use seasoning::reranker::{Client as RerankerClient, RerankerConfig, RerankingProvider};
+use seasoning::reranker::{Client as RerankerClient, RerankerConfig};
+use seasoning::RerankingProvider;
 
 #[tokio::main]
-async fn main() -> eyre::Result<()> {
+async fn main() -> seasoning::Result<()> {
     let reranker = RerankerClient::new(RerankerConfig {
         api_key: Some(SecretString::from("YOUR_API_KEY")),
         base_url: "https://api.deepinfra.com/v1".to_string(),
@@ -83,14 +84,30 @@ async fn main() -> eyre::Result<()> {
         dialect: ProviderDialect::DeepInfra,
         model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
         instruction: None,
+        requests_per_minute: 1000,
+        max_concurrent_requests: 50,
+        tokens_per_minute: 1_000_000,
     })?;
 
+    let query = seasoning::RerankQuery {
+        text: "search query".to_string(),
+        token_count: 2,
+    };
     let docs = vec![
-        "first doc".to_string(),
-        "second doc".to_string(),
-        "third doc".to_string(),
+        seasoning::RerankDocument {
+            text: "first doc".to_string(),
+            token_count: 2,
+        },
+        seasoning::RerankDocument {
+            text: "second doc".to_string(),
+            token_count: 2,
+        },
+        seasoning::RerankDocument {
+            text: "third doc".to_string(),
+            token_count: 2,
+        },
     ];
-    let scores = reranker.rerank("search query", &docs).await?;
+    let scores = reranker.rerank(&query, &docs).await?;
     println!("{scores:?}");
     Ok(())
 }

@@ -20,9 +20,10 @@
 //! use std::time::Duration;
 //! use secrecy::SecretString;
 //! use seasoning::embedding::ProviderDialect;
-//! use seasoning::reranker::{Client, RerankerConfig, RerankingProvider};
+//! use seasoning::RerankingProvider;
+//! use seasoning::reranker::{Client, RerankerConfig};
 //!
-//! # async fn example() -> eyre::Result<()> {
+//! # async fn example() -> seasoning::Result<()> {
 //! // Configure the reranking client
 //! let reranker = Client::new(RerankerConfig {
 //!     api_key: Some(SecretString::from("your-api-key")),
@@ -31,16 +32,32 @@
 //!     dialect: ProviderDialect::DeepInfra,
 //!     model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
 //!     instruction: None,
+//!     requests_per_minute: 1000,
+//!     max_concurrent_requests: 50,
+//!     tokens_per_minute: 1_000_000,
 //! })?;
 //!
 //! // Rerank documents based on query
 //! let documents = vec![
-//!     "Rust is a systems programming language".to_string(),
-//!     "Python is great for data science".to_string(),
-//!     "Rust has memory safety without garbage collection".to_string(),
+//!     seasoning::RerankDocument {
+//!         text: "Rust is a systems programming language".to_string(),
+//!         token_count: 2,
+//!     },
+//!     seasoning::RerankDocument {
+//!         text: "Python is great for data science".to_string(),
+//!         token_count: 2,
+//!     },
+//!     seasoning::RerankDocument {
+//!         text: "Rust has memory safety without garbage collection".to_string(),
+//!         token_count: 2,
+//!     },
 //! ];
 //!
-//! let scores = reranker.rerank("What is Rust?", &documents).await?;
+//! let query = seasoning::RerankQuery {
+//!     text: "What is Rust?".to_string(),
+//!     token_count: 2,
+//! };
+//! let scores = reranker.rerank(&query, &documents).await?;
 //! println!("Relevance scores: {:?}", scores); // Higher scores = more relevant
 //! # Ok(())
 //! # }
@@ -49,18 +66,15 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
-use eyre::Result;
-use http::{
-    HeaderValue,
-    header::{AUTHORIZATION, CONTENT_TYPE},
-};
-use reqwest::Client as HttpClient;
-use secrecy::{ExposeSecret, SecretString};
-use serde::Deserialize;
-use serde_json::json;
-use tracing::{debug, error};
+use secrecy::SecretString;
+use serde::{Deserialize, Serialize};
+use tracing::debug;
 
+use crate::RerankingProvider;
 use crate::embedding::ProviderDialect;
+use crate::reqwestx::{ApiClient, ApiClientConfig};
+use crate::{Error, Result};
+use crate::{RerankDocument, RerankQuery};
 
 /// Configuration for the reranking client.
 ///
@@ -82,6 +96,9 @@ use crate::embedding::ProviderDialect;
 ///     dialect: ProviderDialect::DeepInfra,
 ///     model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
 ///     instruction: Some("Rank by relevance to the query".to_string()),
+///     requests_per_minute: 1000,
+///     max_concurrent_requests: 50,
+///     tokens_per_minute: 1_000_000,
 /// };
 /// ```
 #[derive(Debug, Clone)]
@@ -98,53 +115,12 @@ pub struct RerankerConfig {
     pub model: String,
     /// Optional instruction to guide the reranking model's behavior
     pub instruction: Option<String>,
-}
-
-/// Trait for reranking providers.
-///
-/// This trait abstracts over different reranking implementations,
-/// allowing for easy testing and provider swapping.
-///
-/// # Example Implementation
-///
-/// ```rust,no_run
-/// use async_trait::async_trait;
-/// use eyre::Result;
-/// use seasoning::reranker::RerankingProvider;
-///
-/// struct MockReranker;
-///
-/// #[async_trait]
-/// impl RerankingProvider for MockReranker {
-///     async fn rerank(&self, query: &str, documents: &[String]) -> Result<Vec<f64>> {
-///         // Return mock scores (higher = more relevant)
-///         Ok(vec![0.9, 0.5, 0.7])
-///     }
-/// }
-/// ```
-#[async_trait]
-pub trait RerankingProvider: Send + Sync {
-    /// Rerank documents based on their relevance to a query.
-    ///
-    /// # Arguments
-    ///
-    /// * `query` - The search query to rank documents against
-    /// * `documents` - Slice of document texts to rank
-    ///
-    /// # Returns
-    ///
-    /// Returns a vector of relevance scores, one per document, in the same order
-    /// as the input documents. Scores are typically in the range [0.0, 1.0],
-    /// where higher scores indicate greater relevance to the query.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The query is empty
-    /// - The API request fails
-    /// - The response cannot be parsed
-    /// - Network errors occur
-    async fn rerank(&self, query: &str, documents: &[String]) -> Result<Vec<f64>>;
+    /// Maximum number of requests per minute (rate limit)
+    pub requests_per_minute: usize,
+    /// Maximum number of concurrent requests allowed
+    pub max_concurrent_requests: usize,
+    /// Maximum number of tokens per minute (rate limit)
+    pub tokens_per_minute: u32,
 }
 
 /// Reranking client for scoring document relevance.
@@ -166,7 +142,7 @@ pub trait RerankingProvider: Send + Sync {
 /// use seasoning::embedding::ProviderDialect;
 /// use seasoning::reranker::{Client, RerankerConfig};
 ///
-/// # fn example() -> eyre::Result<()> {
+/// # fn example() -> seasoning::Result<()> {
 /// let client = Client::new(RerankerConfig {
 ///     api_key: Some(SecretString::from("your-api-key")),
 ///     base_url: "https://api.deepinfra.com/v1".to_string(),
@@ -174,15 +150,16 @@ pub trait RerankingProvider: Send + Sync {
 ///     dialect: ProviderDialect::DeepInfra,
 ///     model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
 ///     instruction: None,
+///     requests_per_minute: 1000,
+///     max_concurrent_requests: 50,
+///     tokens_per_minute: 1_000_000,
 /// })?;
 /// # Ok(())
 /// # }
 /// ```
 #[derive(Clone)]
 pub struct Client {
-    client: HttpClient,
-    api_key: Option<SecretString>,
-    base_url: String,
+    client: ApiClient,
     model: String,
     instruction: Option<String>,
     dialect: ProviderDialect,
@@ -197,6 +174,36 @@ struct RerankApiResponse {
     /// Optional token usage information
     #[serde(default)]
     input_tokens: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenAiRerankResponse {
+    data: Vec<OpenAiRerankData>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenAiRerankData {
+    index: usize,
+    relevance_score: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RerankDeepInfraRequest<'a> {
+    queries: Vec<&'a str>,
+    documents: Vec<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    instruction: Option<&'a str>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenAiRerankRequest<'a> {
+    model: &'a str,
+    query: &'a str,
+    documents: Vec<&'a str>,
 }
 
 impl Client {
@@ -224,7 +231,7 @@ impl Client {
     /// use seasoning::embedding::ProviderDialect;
     /// use seasoning::reranker::{Client, RerankerConfig};
     ///
-    /// # fn example() -> eyre::Result<()> {
+    /// # fn example() -> seasoning::Result<()> {
     /// let client = Client::new(RerankerConfig {
     ///     api_key: Some(SecretString::from("your-api-key")),
     ///     base_url: "https://api.deepinfra.com/v1".to_string(),
@@ -237,24 +244,19 @@ impl Client {
     /// # }
     /// ```
     pub fn new(config: RerankerConfig) -> Result<Self> {
-        let mut headers = http::HeaderMap::new();
-        if let Some(api_key) = &config.api_key {
-            let value = HeaderValue::from_str(&format!("Bearer {}", api_key.expose_secret()))
-                .map_err(|err| eyre::eyre!("invalid reranker api key: {err}"))?;
-            headers.insert(AUTHORIZATION, value);
-        }
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-
-        let client = HttpClient::builder()
-            .default_headers(headers)
-            .user_agent(format!("Context/Reranker; dialect={}", config.dialect))
-            .timeout(config.timeout)
-            .build()?;
+        let api_config = ApiClientConfig {
+            base_url: config.base_url.clone(),
+            api_key: config.api_key.clone(),
+            max_concurrent_requests: config.max_concurrent_requests,
+            max_requests_per_minute: config.requests_per_minute,
+            max_tokens_per_minute: config.tokens_per_minute as usize,
+            max_retries: 3,
+            timeout: config.timeout,
+        };
+        let client = ApiClient::new(api_config)?;
 
         Ok(Self {
             client,
-            api_key: config.api_key,
-            base_url: config.base_url,
             model: config.model,
             instruction: config.instruction,
             dialect: config.dialect,
@@ -279,48 +281,29 @@ impl Client {
     /// - The query is empty or contains only whitespace
     /// - The API request fails
     /// - The response cannot be parsed
-    async fn rerank_deepinfra(&self, query: &str, documents: &[String]) -> Result<Vec<f64>> {
+    async fn rerank_deepinfra(
+        &self,
+        query: &RerankQuery,
+        documents: &[RerankDocument],
+    ) -> Result<Vec<f64>> {
         if documents.is_empty() {
             return Ok(Vec::new());
         }
-        if query.trim().is_empty() {
-            return Err(eyre::eyre!("rerank query cannot be empty"));
+        if query.text.trim().is_empty() {
+            return Err(Error::EmptyRerankQuery);
         }
 
-        let queries = vec![query; documents.len()];
-        let mut payload = json!({
-            "queries": queries,
-            "documents": documents,
-        });
+        let payload = RerankDeepInfraRequest {
+            queries: vec![query.text.as_str(); documents.len()],
+            documents: documents.iter().map(|d| d.text.as_str()).collect(),
+            instruction: self.instruction.as_deref(),
+        };
 
-        if let Some(instruction) = &self.instruction {
-            payload["instruction"] = json!(instruction);
-        }
-
-        let endpoint = format!("{}/inference/{}", self.base_url, self.model);
-        let mut req = self.client.post(&endpoint).json(&payload);
-        if let Some(api_key) = &self.api_key {
-            req = req.bearer_auth(api_key.expose_secret());
-        }
-
-        let response = req
-            .send()
-            .await
-            .map_err(|e| {
-                error!("Failed to send reranking request: {e}");
-                e
-            })?
-            .error_for_status()
-            .map_err(|e| {
-                error!("Reranking request returned error status: {e}");
-                e
-            })?
-            .json::<RerankApiResponse>()
-            .await
-            .map_err(|e| {
-                error!("Failed to parse reranking response: {e}");
-                e
-            })?;
+        let token_count = estimate_token_count(query, documents);
+        let response: RerankApiResponse = self
+            .client
+            .post_json(&format!("/inference/{}", self.model), &payload, token_count)
+            .await?;
 
         if let Some(input_tokens) = response.input_tokens {
             debug!("Reranking used {} input tokens", input_tokens);
@@ -332,16 +315,251 @@ impl Client {
             .map(|s| s.clamp(0.0, 1.0))
             .collect())
     }
+
+    async fn rerank_openai(
+        &self,
+        query: &RerankQuery,
+        documents: &[RerankDocument],
+    ) -> Result<Vec<f64>> {
+        if documents.is_empty() {
+            return Ok(Vec::new());
+        }
+        if query.text.trim().is_empty() {
+            return Err(Error::EmptyRerankQuery);
+        }
+
+        let payload = OpenAiRerankRequest {
+            model: self.model.as_str(),
+            query: query.text.as_str(),
+            documents: documents.iter().map(|d| d.text.as_str()).collect(),
+        };
+
+        let token_count = estimate_token_count_openai(query, documents);
+        let response: OpenAiRerankResponse = self
+            .client
+            .post_json("/rerank", &payload, token_count)
+            .await?;
+
+        let mut scores = vec![0.0f64; documents.len()];
+        for item in response.data {
+            if let Some(score) = scores.get_mut(item.index) {
+                *score = item.relevance_score.clamp(0.0, 1.0);
+            }
+        }
+
+        Ok(scores)
+    }
 }
 
 #[async_trait]
 impl RerankingProvider for Client {
-    async fn rerank(&self, query: &str, documents: &[String]) -> Result<Vec<f64>> {
+    async fn rerank(&self, query: &RerankQuery, documents: &[RerankDocument]) -> Result<Vec<f64>> {
         match self.dialect {
             ProviderDialect::DeepInfra => self.rerank_deepinfra(query, documents).await,
-            ProviderDialect::OpenAI => Err(eyre::eyre!(
-                "openai reranking is not configured; use deepinfra or add openai support"
-            )),
+            ProviderDialect::OpenAI => self.rerank_openai(query, documents).await,
         }
+    }
+}
+
+fn estimate_token_count(query: &RerankQuery, documents: &[RerankDocument]) -> u32 {
+    // DeepInfra reranking payload repeats the query once per document.
+    let query_total = (query.token_count as u32).saturating_mul(documents.len() as u32);
+    let docs_total = documents
+        .iter()
+        .fold(0u32, |acc, d| acc.saturating_add(d.token_count as u32));
+    query_total.saturating_add(docs_total)
+}
+
+fn estimate_token_count_openai(query: &RerankQuery, documents: &[RerankDocument]) -> u32 {
+    let query_total = query.token_count as u32;
+    let docs_total = documents
+        .iter()
+        .fold(0u32, |acc, d| acc.saturating_add(d.token_count as u32));
+    query_total.saturating_add(docs_total)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use secrecy::SecretString;
+    use wiremock::matchers::{body_json, header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn rerank_deepinfra_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/inference/test-model"))
+            .and(body_json(serde_json::json!({
+                "queries": ["q", "q", "q"],
+                "documents": ["a", "b", "c"]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "scores": [1.2, -0.1, 0.5],
+                "inputTokens": 123
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: mock_server.uri(),
+            timeout: Duration::from_secs(10),
+            dialect: ProviderDialect::DeepInfra,
+            model: "test-model".to_string(),
+            instruction: None,
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        })
+        .unwrap();
+
+        let query = RerankQuery {
+            text: "q".to_string(),
+            token_count: 1,
+        };
+        let documents = vec![
+            RerankDocument {
+                text: "a".to_string(),
+                token_count: 2,
+            },
+            RerankDocument {
+                text: "b".to_string(),
+                token_count: 2,
+            },
+            RerankDocument {
+                text: "c".to_string(),
+                token_count: 2,
+            },
+        ];
+
+        let scores = client.rerank(&query, &documents).await.unwrap();
+        assert_eq!(scores, vec![1.0, 0.0, 0.5]);
+    }
+
+    #[tokio::test]
+    async fn rerank_deepinfra_requires_query() {
+        let mock_server = MockServer::start().await;
+
+        let client = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: mock_server.uri(),
+            timeout: Duration::from_secs(10),
+            dialect: ProviderDialect::DeepInfra,
+            model: "test-model".to_string(),
+            instruction: None,
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        })
+        .unwrap();
+
+        let query = RerankQuery {
+            text: "   ".to_string(),
+            token_count: 0,
+        };
+        let documents = vec![RerankDocument {
+            text: "a".to_string(),
+            token_count: 1,
+        }];
+
+        let err = client.rerank(&query, &documents).await.unwrap_err();
+        assert!(matches!(err, Error::EmptyRerankQuery));
+    }
+
+    #[tokio::test]
+    async fn rerank_deepinfra_sets_authorization_header() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/inference/test-model"))
+            .and(header("Authorization", "Bearer test_key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "scores": [0.1]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new(RerankerConfig {
+            api_key: Some(SecretString::from("test_key")),
+            base_url: mock_server.uri(),
+            timeout: Duration::from_secs(10),
+            dialect: ProviderDialect::DeepInfra,
+            model: "test-model".to_string(),
+            instruction: None,
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        })
+        .unwrap();
+
+        let query = RerankQuery {
+            text: "q".to_string(),
+            token_count: 1,
+        };
+        let documents = vec![RerankDocument {
+            text: "a".to_string(),
+            token_count: 1,
+        }];
+
+        let _ = client.rerank(&query, &documents).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rerank_openai_success() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/rerank"))
+            .and(body_json(serde_json::json!({
+                "model": "test-model",
+                "query": "q",
+                "documents": ["a", "b", "c"]
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [
+                    { "index": 1, "relevanceScore": 1.2 },
+                    { "index": 0, "relevanceScore": -0.1 },
+                    { "index": 2, "relevanceScore": 0.5 }
+                ]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: mock_server.uri(),
+            timeout: Duration::from_secs(10),
+            dialect: ProviderDialect::OpenAI,
+            model: "test-model".to_string(),
+            instruction: None,
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        })
+        .unwrap();
+
+        let query = RerankQuery {
+            text: "q".to_string(),
+            token_count: 1,
+        };
+        let documents = vec![
+            RerankDocument {
+                text: "a".to_string(),
+                token_count: 2,
+            },
+            RerankDocument {
+                text: "b".to_string(),
+                token_count: 2,
+            },
+            RerankDocument {
+                text: "c".to_string(),
+                token_count: 2,
+            },
+        ];
+
+        let scores = client.rerank(&query, &documents).await.unwrap();
+        assert_eq!(scores, vec![0.0, 1.0, 0.5]);
     }
 }
