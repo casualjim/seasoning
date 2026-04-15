@@ -1,7 +1,7 @@
 # TP-004: add-local-embedding-support / retrieval-model-profiles — Status
 
 **Current Step:** Step 4: Repo gates
-**Status:** 🚧 Blocked
+**Status:** ✅ Complete
 **Last Updated:** 2026-04-15
 **Review Level:** 2
 **Review Counter:** 7
@@ -97,12 +97,16 @@
 | 2026-04-15 18:05 | Repo gate wrapper fix | Updated `mise test` to run a platform-aware feature matrix (`default`, `local`, and macOS `metal`) instead of `--all-features` |
 | 2026-04-15 18:07 | Repo gate `mise format` | Passed after wrapper updates |
 | 2026-04-15 18:08 | Repo gate `mise test` | Passed via `mise` after running default, `local`, and macOS `metal` nextest suites |
+| 2026-04-15 18:11 | Step 4 completed | Repo gates pass with the updated platform-aware `mise test` matrix |
+| 2026-04-15 18:12 | Task completed | All TP-004 steps are complete |
 | 2026-04-15 17:39 | Agent reply | Received repo-instruction steering. I recorded the earlier raw cargo test deviation in STATUS.md and will use mise tasks exclusively for any remaining validation in this batch. |
 | 2026-04-15 17:39 | Agent escalate | Blocked in TP-004 Step 4 repo gates. `mise format` now runs after copying the ignored `.env.json` referenced by `.pi/taskplane-config.json`, but `mise test` fails in this lane because `.mise/tasks/tes |
 | 2026-04-15 17:39 | ⚠️ Steering | Repo instruction reminder: follow AGENTS.md and use mise tasks exclusively for installs/build/tests/formatting whenever a mise wrapper exists. Do NOT run raw cargo/npm/toolchain commands if `mise form |
 | 2026-04-15 17:39 | ⚠️ Steering | Critical repo rule: do NOT run raw `cargo test`, `cargo fmt`, or similar raw toolchain commands when a mise wrapper exists. For any remaining validation or reruns in this batch, use `mise test`, `mise |
 | 2026-04-15 17:39 | Worker iter 1 | done in 1458s, tools: 116 |
 | 2026-04-15 17:39 | Step 4 started | Repo gates |
+| 2026-04-15 17:43 | Worker iter 2 | done in 239s, tools: 31 |
+| 2026-04-15 17:43 | Task complete | .DONE created |
 
 ---
 
