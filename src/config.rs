@@ -195,8 +195,7 @@ mod tests {
         let config = Embedding {
             url: String::new(),
             api_key: None,
-            model: "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf"
-                .to_string(),
+            model: "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf".to_string(),
             tokenizer: String::new(),
             dialect: "llama.cpp".to_string(),
             model_family: "gemma".to_string(),
@@ -215,7 +214,10 @@ mod tests {
 
         assert_eq!(converted.dialect, Dialect::LlamaCpp);
         assert_eq!(converted.model_family, ModelFamily::Gemma);
-        assert_eq!(converted.query_instruction.as_deref(), Some("retrieve docs"));
+        assert_eq!(
+            converted.query_instruction.as_deref(),
+            Some("retrieve docs")
+        );
     }
 
     #[test]

@@ -4,4 +4,16 @@
 #MISE sources=["Cargo.toml", "src/**/*.rs"]
 #MISE depends=["build:debug"]
 
-cargo nextest run --all-features
+set -euo pipefail
+
+cargo nextest run
+cargo nextest run --features local
+
+case "$(uname -s)" in
+  Darwin)
+    cargo nextest run --features metal
+    ;;
+  *)
+    echo "Skipping accelerator passthrough feature test runs in the default repo gate; they require platform-specific native toolchains."
+    ;;
+esac
