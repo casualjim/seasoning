@@ -96,6 +96,11 @@
 | 2026-04-15 18:07 | Step 3 started | Write conformance report |
 | 2026-04-15 18:10 | Step 3 completed | Conformance report written with explicit evidence-backed REMEDIATION_TASK verdict |
 | 2026-04-15 18:10 | Task completed | All TP-005 steps complete |
+| 2026-04-15 18:10 | Agent reply | Acknowledged steering/user guidance for TP-005 conformance: I will explicitly evaluate Wave 1 `.mise` edits (`mise.toml`, `.mise/tasks/test/_default`, `.mise/tasks/test/rust`) for out-of-scope status  |
+| 2026-04-15 18:10 | ⚠️ Steering | Conformance focus item for TP-005: inspect Wave 1 changes to `mise.toml`, `.mise/tasks/test/_default`, and `.mise/tasks/test/rust`. Those files were outside the approved TP-004 edit surface, and the f |
+| 2026-04-15 18:10 | ⚠️ Steering | Operator guidance for TP-005 conformance: the repo gate fix should NOT run multiple redundant nextest suites. Correct shape is a single platform/toolchain probe that selects exactly one feature set: o |
+| 2026-04-15 18:10 | Worker iter 1 | done in 1525s, tools: 139 |
+| 2026-04-15 18:10 | Task complete | .DONE created |
 
 ---
 
