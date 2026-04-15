@@ -14,11 +14,17 @@ Retrieval-focused embedding and reranking infrastructure for Rust.
 
 Seasoning now separates **backend dialect** from **model-family behavior**:
 
-- `Dialect::{OpenAI, DeepInfra, LlamaCpp}` chooses the transport/runtime.
+- `Dialect::{OpenAI, DeepInfra, LlamaCpp}` chooses the transport/runtime (config parsing accepts `llamacpp`, `llama-cpp`, or `llama_cpp`).
 - `ModelFamily::{Gemma, Qwen3}` chooses retrieval formatting semantics.
 - `EmbeddingRole::{Query, Document}` tells the crate how to format each embedding input.
 
 That means callers pass semantic inputs and the crate formats final model text internally.
+
+For example:
+- Gemma queries become `task: <task> | query: <text>`.
+- Gemma documents become `title: <title-or-none> | text: <text>`.
+- Qwen3 queries become `Instruct: <instruction>\nQuery: <text>`.
+- Qwen3 documents stay plain text unless a title is present, in which case the title is prepended on its own line.
 
 ## Install
 
@@ -176,7 +182,7 @@ let reranker = RerankerClient::new(RerankerConfig {
 # Ok::<(), seasoning::Error>(())
 ```
 
-Supported local GGUF artifacts are intentionally narrow for this change:
+Supported local GGUF artifacts are intentionally narrow for this change, and unsupported local models fail during client construction:
 
 - `hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf`
 - `hf:Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf`

@@ -1,10 +1,10 @@
 # TP-003: add-local-embedding-support / local-reranking — Status
 
-**Current Step:** Step 3: Documentation and examples
+**Current Step:** Step 4: Repo gates
 **Status:** 🟡 In Progress
 **Last Updated:** 2026-04-15
 **Review Level:** 2
-**Review Counter:** 5
+**Review Counter:** 6
 **Iteration:** 1
 **Size:** M
 
@@ -39,15 +39,15 @@
 ---
 
 ### Step 3: Documentation and examples
-**Status:** 🟨 In Progress
+**Status:** ✅ Complete
 
-- [ ] Update the required docs and examples for this capability slice
-- [ ] Review adjacent docs or examples listed in the proof obligations and update them if affected
+- [x] Update the required docs and examples for this capability slice
+- [x] Review adjacent docs or examples listed in the proof obligations and update them if affected
 
 ---
 
 ### Step 4: Repo gates
-**Status:** ⬜ Not Started
+**Status:** 🟨 In Progress
 
 - [ ] Run the required repo gates and leave the repository in a fully passing state
 
@@ -86,6 +86,8 @@
 | 2026-04-15 17:07 | Review R004 | plan Step 2: REVISE |
 | 2026-04-15 17:11 | Step 2 completed | Added formatting/validation tests and ran default + local test passes |
 | 2026-04-15 17:11 | Step 3 started | Documentation and examples |
+| 2026-04-15 17:14 | Step 3 completed | README and crate examples updated; adjacent docs reviewed |
+| 2026-04-15 17:14 | Step 4 started | Repo gates |
 
 ---
 
@@ -100,4 +102,6 @@
 - Step 1 plan hydrated after R001 to explicitly cover semantic embedding formatting, construction-time validation/model allowlists, and async-preserving local execution.
 - Step 1 implementation must keep query-only instruction application, Gemma `title: none | text: ...` formatting, and local reranker score/index correspondence visible as contract-critical outcomes ahead of Step 2 verification.
 - Step 2 must explicitly validate both default and `local` feature-gated test paths because `mise test` does not enable `--features local`.
+- Reviewed `openspec/changes/add-local-embedding-support/proposal.md` and `design.md` after documentation updates; both remained aligned with the implemented scope, so no adjacent contract-doc edits were required.
 | 2026-04-15 17:09 | Review R005 | plan Step 2: APPROVE |
+| 2026-04-15 17:12 | Review R006 | code Step 2: APPROVE |

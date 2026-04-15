@@ -29,7 +29,11 @@
 //!     }
 //! });
 //!
-//! let _: AppConfig = serde_json::from_value(config_json).unwrap();
+//! let config: AppConfig = serde_json::from_value(config_json).unwrap();
+//! assert_eq!(config.embedding.dialect, "deepinfra");
+//! assert_eq!(config.embedding.model_family, "qwen3");
+//! // `dialect` values also accept `llamacpp`, `llama-cpp`, and `llama_cpp`
+//! // when converted through `to_embedder_config` / `to_reranker_config`.
 //! ```
 
 use std::time::Duration;

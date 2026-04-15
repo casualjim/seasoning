@@ -31,7 +31,8 @@
 //!     token_count: 6,
 //! }];
 //!
-//! let _ = client.rerank(&query, &documents).await?;
+//! let scores = client.rerank(&query, &documents).await?;
+//! assert_eq!(scores.len(), documents.len());
 //! # Ok(())
 //! # }
 //! ```

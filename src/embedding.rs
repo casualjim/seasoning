@@ -24,12 +24,22 @@
 //!     tokens_per_minute: 1_000_000,
 //! })?;
 //!
-//! let inputs = vec![EmbeddingInput {
-//!     role: EmbeddingRole::Query,
-//!     text: "memory safety".to_string(),
-//!     title: None,
-//!     token_count: 2,
-//! }];
+//! let inputs = vec![
+//!     EmbeddingInput {
+//!         role: EmbeddingRole::Query,
+//!         text: "memory safety".to_string(),
+//!         title: None,
+//!         token_count: 2,
+//!     },
+//!     EmbeddingInput {
+//!         role: EmbeddingRole::Document,
+//!         text: "Rust prevents data races".to_string(),
+//!         title: Some("Rust".to_string()),
+//!         token_count: 4,
+//!     },
+//! ];
+//!
+//! // `query_instruction` is applied only to the query input above.
 //!
 //! let _ = client.embed(&inputs).await?;
 //! # Ok(())

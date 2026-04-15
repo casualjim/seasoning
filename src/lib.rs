@@ -3,6 +3,11 @@
 //! Retrieval-focused embedding and reranking infrastructure with explicit model
 //! semantics, rate limiting, retries, and optional local llama.cpp execution.
 //!
+//! Seasoning separates backend/runtime selection from retrieval formatting:
+//! [`Dialect`] selects transport or local execution, [`ModelFamily`] selects
+//! retrieval-family formatting, and [`EmbeddingRole`] identifies whether an
+//! embedding input is a query or document.
+//!
 //! ## Embeddings
 //!
 //! ```rust,no_run
@@ -36,6 +41,9 @@
 //!     title: None,
 //!     token_count: 4,
 //! }];
+//!
+//! // Qwen3 query instructions apply only to query inputs; document inputs
+//! // ignore them and use plain or title-prefixed text formatting.
 //!
 //! let _ = embedder.embed(&inputs).await?;
 //! # Ok(())
@@ -75,7 +83,8 @@
 //!     token_count: 6,
 //! }];
 //!
-//! let _ = reranker.rerank(&query, &documents).await?;
+//! let scores = reranker.rerank(&query, &documents).await?;
+//! assert_eq!(scores.len(), documents.len());
 //! # Ok(())
 //! # }
 //! ```
