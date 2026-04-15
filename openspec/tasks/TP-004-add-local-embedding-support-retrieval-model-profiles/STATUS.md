@@ -24,8 +24,12 @@
 **Status:** 🟨 In Progress
 
 - [ ] Apply the requested delta for this capability inside the approved module ownership and edit surface
+  - [ ] Reconcile embedding-client construction and semantic formatting behavior with the approved dialect/model-family contract
+  - [ ] Reconcile reranker/local-runtime validation and score semantics with the approved dialect/model-family contract
 - [ ] Implement the approved behavioral semantics and exact failure or edge-case semantics
+  - [ ] Cover the missing edge-case semantics uncovered during implementation review
 - [ ] Preserve all stated constraints and do not alter interfaces beyond the approved delta
+  - [ ] Keep the remote client entry points and public semantic API stable while applying the approved fixes
 
 ---
 
