@@ -1,125 +1,203 @@
 # seasoning
 
-Embedding + reranking infrastructure as a Rust library.
+Retrieval-focused embedding and reranking infrastructure for Rust.
 
 ## What this gives you
 
-- An embedding client with rate limiting and retries.
-- A reranker client (DeepInfra API shape).
-- Simple config structs you can wire into your own config loader.
+- Semantic embedding inputs with explicit query/document roles.
+- Model-family-aware formatting for Gemma and Qwen3 retrieval models.
+- Remote OpenAI-compatible and DeepInfra backends.
+- Feature-gated local llama.cpp execution for the scoped Hugging Face GGUF models.
+- Rate limiting, retry handling, and async public APIs.
+
+## Semantic model
+
+Seasoning now separates **backend dialect** from **model-family behavior**:
+
+- `Dialect::{OpenAI, DeepInfra, LlamaCpp}` chooses the transport/runtime (config parsing accepts `llama.cpp`, `llamacpp`, `llama-cpp`, or `llama_cpp`).
+- `ModelFamily::{Gemma, Qwen3}` chooses retrieval formatting semantics.
+- `EmbeddingRole::{Query, Document}` tells the crate how to format each embedding input.
+
+That means callers pass semantic inputs and the crate formats final model text internally.
+
+For example:
+- Gemma queries become `task: <task> | query: <text>`.
+- Gemma documents become `title: <title-or-none> | text: <text>`.
+- Qwen3 queries become `Instruct: <instruction>\nQuery: <text>`.
+- Qwen3 documents stay plain text unless a title is present, in which case the title is prepended on its own line.
 
 ## Install
 
-This repo is not published to crates.io. Use a path dependency:
+Remote-only usage:
 
 ```toml
 [dependencies]
 seasoning = { path = "." }
 ```
 
+Local llama.cpp usage:
+
+```toml
+[dependencies]
+seasoning = { path = ".", features = ["local"] }
+```
+
+Accelerator passthrough features imply `local`:
+
+```toml
+[dependencies]
+seasoning = { path = ".", features = ["cuda"] }
+# or: ["metal"], ["vulkan"]
+```
+
 ## Usage
 
 ### Embeddings
 
-```rust
+```rust,no_run
 use std::time::Duration;
 
 use secrecy::SecretString;
+use seasoning::EmbeddingProvider;
 use seasoning::embedding::{
-    Client as EmbedClient, EmbedderConfig, EmbeddingInput, ProviderDialect,
+    Client as EmbedClient, Dialect, EmbedderConfig, EmbeddingInput, EmbeddingRole, ModelFamily,
 };
 
-#[tokio::main]
-async fn main() -> seasoning::Result<()> {
-    let embedder = EmbedClient::new(EmbedderConfig {
-        api_key: Some(SecretString::from("YOUR_API_KEY")),
-        base_url: "https://api.deepinfra.com/v1/openai".to_string(),
-        timeout: Duration::from_secs(10),
-        dialect: ProviderDialect::DeepInfra,
-        model: "Qwen/Qwen3-Embedding-0.6B".to_string(),
-        embedding_dim: 1024,
-        requests_per_minute: 1000,
-        max_concurrent_requests: 50,
-        tokens_per_minute: 1_000_000,
-    })?;
+# async fn example() -> seasoning::Result<()> {
+let embedder = EmbedClient::new(EmbedderConfig {
+    api_key: Some(SecretString::from("YOUR_API_KEY")),
+    base_url: "https://api.deepinfra.com/v1/openai".to_string(),
+    timeout: Duration::from_secs(10),
+    dialect: Dialect::DeepInfra,
+    model_family: ModelFamily::Qwen3,
+    model: "Qwen/Qwen3-Embedding-0.6B".to_string(),
+    query_instruction: Some("Given a user query, retrieve matching passages".to_string()),
+    embedding_dim: 1024,
+    requests_per_minute: 1000,
+    max_concurrent_requests: 50,
+    tokens_per_minute: 1_000_000,
+})?;
 
-    let inputs = vec![
-        EmbeddingInput {
-            text: "hello world".to_string(),
-            token_count: 2,
-        },
-        EmbeddingInput {
-            text: "another string".to_string(),
-            token_count: 2,
-        },
-    ];
+let inputs = vec![
+    EmbeddingInput {
+        role: EmbeddingRole::Query,
+        text: "memory safety without garbage collection".to_string(),
+        title: None,
+        token_count: 6,
+    },
+    EmbeddingInput {
+        role: EmbeddingRole::Document,
+        text: "Rust prevents data races at compile time".to_string(),
+        title: Some("Rust overview".to_string()),
+        token_count: 8,
+    },
+];
 
-    let result = embedder.embed(&inputs).await?;
-    println!("got {} embeddings", result.embeddings.len());
-    Ok(())
-}
+let result = embedder.embed(&inputs).await?;
+println!("got {} embeddings", result.embeddings.len());
+# Ok(())
+# }
 ```
-
-Notes:
-- `token_count` is required per input so the rate limiter can budget tokens.
-- `requests_per_minute`, `max_concurrent_requests`, and `tokens_per_minute`
-  control the rate limiter and concurrency.
 
 ### Reranking
 
-```rust
+```rust,no_run
 use std::time::Duration;
 
 use secrecy::SecretString;
-use seasoning::embedding::ProviderDialect;
-use seasoning::reranker::{Client as RerankerClient, RerankerConfig};
 use seasoning::RerankingProvider;
+use seasoning::embedding::{Dialect, ModelFamily};
+use seasoning::reranker::{Client as RerankerClient, RerankerConfig};
 
-#[tokio::main]
-async fn main() -> seasoning::Result<()> {
-    let reranker = RerankerClient::new(RerankerConfig {
-        api_key: Some(SecretString::from("YOUR_API_KEY")),
-        base_url: "https://api.deepinfra.com/v1".to_string(),
-        timeout: Duration::from_secs(10),
-        dialect: ProviderDialect::DeepInfra,
-        model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
-        instruction: None,
-        requests_per_minute: 1000,
-        max_concurrent_requests: 50,
-        tokens_per_minute: 1_000_000,
-    })?;
+# async fn example() -> seasoning::Result<()> {
+let reranker = RerankerClient::new(RerankerConfig {
+    api_key: Some(SecretString::from("YOUR_API_KEY")),
+    base_url: "https://api.deepinfra.com/v1".to_string(),
+    timeout: Duration::from_secs(10),
+    dialect: Dialect::DeepInfra,
+    model_family: ModelFamily::Qwen3,
+    model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
+    instruction: None,
+    requests_per_minute: 1000,
+    max_concurrent_requests: 50,
+    tokens_per_minute: 1_000_000,
+})?;
 
-    let query = seasoning::RerankQuery {
-        text: "search query".to_string(),
-        token_count: 2,
-    };
-    let docs = vec![
-        seasoning::RerankDocument {
-            text: "first doc".to_string(),
-            token_count: 2,
-        },
-        seasoning::RerankDocument {
-            text: "second doc".to_string(),
-            token_count: 2,
-        },
-        seasoning::RerankDocument {
-            text: "third doc".to_string(),
-            token_count: 2,
-        },
-    ];
-    let scores = reranker.rerank(&query, &docs).await?;
-    println!("{scores:?}");
-    Ok(())
-}
+let query = seasoning::RerankQuery {
+    text: "memory-safe systems programming".to_string(),
+    token_count: 4,
+};
+let docs = vec![
+    seasoning::RerankDocument {
+        text: "Rust offers ownership and borrowing".to_string(),
+        token_count: 6,
+    },
+    seasoning::RerankDocument {
+        text: "Python emphasizes developer ergonomics".to_string(),
+        token_count: 5,
+    },
+];
+
+let scores = reranker.rerank(&query, &docs).await?;
+println!("{scores:?}");
+# Ok(())
+# }
 ```
 
-Notes:
-- The DeepInfra endpoint is built as `{base_url}/inference/{model}`.
-- The reranker client currently supports `ProviderDialect::DeepInfra` only.
+### Local llama.cpp embeddings and reranking
+
+```rust,ignore
+use std::time::Duration;
+
+use seasoning::embedding::{Client as EmbedClient, Dialect, EmbedderConfig, ModelFamily};
+use seasoning::reranker::{Client as RerankerClient, RerankerConfig};
+
+let embedder = EmbedClient::new(EmbedderConfig {
+    api_key: None,
+    base_url: String::new(),
+    timeout: Duration::from_secs(30),
+    dialect: Dialect::LlamaCpp,
+    model_family: ModelFamily::Gemma,
+    model: "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf".to_string(),
+    query_instruction: None,
+    embedding_dim: 768,
+    requests_per_minute: 1,
+    max_concurrent_requests: 1,
+    tokens_per_minute: 1_000_000,
+})?;
+
+let reranker = RerankerClient::new(RerankerConfig {
+    api_key: None,
+    base_url: String::new(),
+    timeout: Duration::from_secs(30),
+    dialect: Dialect::LlamaCpp,
+    model_family: ModelFamily::Qwen3,
+    model: "hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf".to_string(),
+    instruction: None,
+    requests_per_minute: 1,
+    max_concurrent_requests: 1,
+    tokens_per_minute: 1_000_000,
+})?;
+# let _ = (embedder, reranker);
+# Ok::<(), seasoning::Error>(())
+```
+
+Supported local GGUF artifacts are intentionally narrow for this change, and unsupported local models fail during client construction. Config-driven setups may spell the local dialect as `llama.cpp`, `llamacpp`, `llama-cpp`, or `llama_cpp`:
+
+- `hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf`
+- `hf:Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf`
+- `hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf`
+
+## Notes
+
+- Local `Dialect::LlamaCpp` construction fails explicitly when the crate is built without the `local` feature.
+- Gemma document formatting uses `title: none | text: ...` when no title is supplied.
+- Qwen3 query instructions apply only to query embeddings; document embeddings ignore them.
+- Existing remote entry points are preserved, but retrieval semantics now come from `ModelFamily` rather than transport labels.
 
 ## Modules
 
-- `seasoning::embedding` for embeddings
+- `seasoning::embedding` for embeddings and retrieval formatting inputs
 - `seasoning::reranker` for reranking
 - `seasoning::reqwestx` for the rate-limited API client
 - `seasoning::config` for config structs (no I/O)

@@ -35,8 +35,26 @@ pub enum Error {
     #[error("rerank query cannot be empty")]
     EmptyRerankQuery,
 
-    #[error("provider dialect '{value}' is invalid (expected: openai|deepinfra)")]
+    #[error("provider dialect '{value}' is invalid (expected: openai|deepinfra|llamacpp)")]
     InvalidProviderDialect { value: String },
+
+    #[error("model family '{value}' is invalid (expected: gemma|qwen3)")]
+    InvalidModelFamily { value: String },
+
+    #[error("dialect '{dialect}' requires the `local` feature")]
+    LocalFeatureRequired { dialect: String },
+
+    #[error("unsupported configuration: {message}")]
+    UnsupportedConfiguration { message: String },
+
+    #[error("unsupported local model '{model}' for {kind}")]
+    UnsupportedLocalModel { kind: &'static str, model: String },
+
+    #[error("local runtime failed: {message}")]
+    LocalRuntime { message: String },
+
+    #[error("local runtime channel closed unexpectedly")]
+    LocalRuntimeChannelClosed,
 
     #[error("api request failed with status {status}")]
     ApiStatus {
@@ -46,6 +64,12 @@ pub enum Error {
 
     #[error("embedder returned {embeddings} embeddings for {inputs} inputs")]
     EmbeddingCountMismatch { embeddings: usize, inputs: usize },
+
+    #[error("reranker returned {scores} scores for {inputs} inputs")]
+    RerankScoreCountMismatch { scores: usize, inputs: usize },
+
+    #[error("reranker returned an invalid score index {index} for {inputs} inputs")]
+    InvalidRerankScoreIndex { index: usize, inputs: usize },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

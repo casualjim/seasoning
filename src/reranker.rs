@@ -1,35 +1,20 @@
 //! Document reranking based on query relevance.
 //!
-//! This module provides a client for reranking documents using AI models,
-//! which score documents based on their relevance to a given query.
-//!
-//! # Overview
-//!
-//! The main entry point is the [`Client`] which implements the [`RerankingProvider`] trait.
-//! Reranking is useful for improving search results by using a specialized model to
-//! score documents based on semantic relevance to a query.
-//!
-//! # Supported Providers
-//!
-//! Currently supports:
-//! - DeepInfra API dialect
-//!
-//! # Example
-//!
 //! ```rust,no_run
 //! use std::time::Duration;
+//!
 //! use secrecy::SecretString;
-//! use seasoning::embedding::ProviderDialect;
 //! use seasoning::RerankingProvider;
+//! use seasoning::embedding::{Dialect, ModelFamily};
 //! use seasoning::reranker::{Client, RerankerConfig};
 //!
 //! # async fn example() -> seasoning::Result<()> {
-//! // Configure the reranking client
-//! let reranker = Client::new(RerankerConfig {
+//! let client = Client::new(RerankerConfig {
 //!     api_key: Some(SecretString::from("your-api-key")),
 //!     base_url: "https://api.deepinfra.com/v1".to_string(),
 //!     timeout: Duration::from_secs(10),
-//!     dialect: ProviderDialect::DeepInfra,
+//!     dialect: Dialect::DeepInfra,
+//!     model_family: ModelFamily::Qwen3,
 //!     model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
 //!     instruction: None,
 //!     requests_per_minute: 1000,
@@ -37,28 +22,17 @@
 //!     tokens_per_minute: 1_000_000,
 //! })?;
 //!
-//! // Rerank documents based on query
-//! let documents = vec![
-//!     seasoning::RerankDocument {
-//!         text: "Rust is a systems programming language".to_string(),
-//!         token_count: 2,
-//!     },
-//!     seasoning::RerankDocument {
-//!         text: "Python is great for data science".to_string(),
-//!         token_count: 2,
-//!     },
-//!     seasoning::RerankDocument {
-//!         text: "Rust has memory safety without garbage collection".to_string(),
-//!         token_count: 2,
-//!     },
-//! ];
-//!
 //! let query = seasoning::RerankQuery {
-//!     text: "What is Rust?".to_string(),
-//!     token_count: 2,
+//!     text: "memory-safe systems programming".to_string(),
+//!     token_count: 4,
 //! };
-//! let scores = reranker.rerank(&query, &documents).await?;
-//! println!("Relevance scores: {:?}", scores); // Higher scores = more relevant
+//! let documents = vec![seasoning::RerankDocument {
+//!     text: "Rust uses ownership and borrowing".to_string(),
+//!     token_count: 6,
+//! }];
+//!
+//! let scores = client.rerank(&query, &documents).await?;
+//! assert_eq!(scores.len(), documents.len());
 //! # Ok(())
 //! # }
 //! ```
@@ -71,107 +45,63 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::RerankingProvider;
-use crate::embedding::ProviderDialect;
+#[cfg(feature = "local")]
+use crate::local::LocalRerankerClient;
 use crate::reqwestx::{ApiClient, ApiClientConfig};
-use crate::{Error, Result};
+use crate::{Dialect, Error, ModelFamily, Result};
 use crate::{RerankDocument, RerankQuery};
 
 /// Configuration for the reranking client.
-///
-/// This struct contains all parameters needed to configure the reranking client,
-/// including API credentials and model parameters.
-///
-/// # Example
-///
-/// ```rust
-/// use std::time::Duration;
-/// use secrecy::SecretString;
-/// use seasoning::embedding::ProviderDialect;
-/// use seasoning::reranker::RerankerConfig;
-///
-/// let config = RerankerConfig {
-///     api_key: Some(SecretString::from("your-api-key")),
-///     base_url: "https://api.deepinfra.com/v1".to_string(),
-///     timeout: Duration::from_secs(10),
-///     dialect: ProviderDialect::DeepInfra,
-///     model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
-///     instruction: Some("Rank by relevance to the query".to_string()),
-///     requests_per_minute: 1000,
-///     max_concurrent_requests: 50,
-///     tokens_per_minute: 1_000_000,
-/// };
-/// ```
 #[derive(Debug, Clone)]
 pub struct RerankerConfig {
-    /// Optional API key for authentication
+    /// Optional API key for authentication.
     pub api_key: Option<SecretString>,
-    /// Base URL for the reranking API endpoint (e.g., `https://api.deepinfra.com/v1`)
+    /// Base URL for the reranking API endpoint.
     pub base_url: String,
-    /// Request timeout duration
+    /// Request timeout duration.
     pub timeout: Duration,
-    /// Provider dialect for API compatibility
-    pub dialect: ProviderDialect,
-    /// Model identifier (e.g., "Qwen/Qwen3-Reranker-0.6B")
+    /// Backend dialect for execution.
+    pub dialect: Dialect,
+    /// Retrieval-model family used by the reranker.
+    pub model_family: ModelFamily,
+    /// Model identifier.
     pub model: String,
-    /// Optional instruction to guide the reranking model's behavior
+    /// Optional instruction to guide reranking behavior.
     pub instruction: Option<String>,
-    /// Maximum number of requests per minute (rate limit)
+    /// Maximum number of requests per minute.
     pub requests_per_minute: usize,
-    /// Maximum number of concurrent requests allowed
+    /// Maximum number of concurrent requests allowed.
     pub max_concurrent_requests: usize,
-    /// Maximum number of tokens per minute (rate limit)
+    /// Maximum number of tokens per minute.
     pub tokens_per_minute: u32,
 }
 
-/// Reranking client for scoring document relevance.
-///
-/// The client sends reranking requests to AI models that score documents
-/// based on their semantic relevance to a query. This is useful for improving
-/// search result quality beyond simple keyword matching or initial retrieval.
-///
-/// # Supported Dialects
-///
-/// Currently supports:
-/// - [`ProviderDialect::DeepInfra`] - Uses DeepInfra's inference endpoint
-///
-/// # Example
-///
-/// ```rust,no_run
-/// use std::time::Duration;
-/// use secrecy::SecretString;
-/// use seasoning::embedding::ProviderDialect;
-/// use seasoning::reranker::{Client, RerankerConfig};
-///
-/// # fn example() -> seasoning::Result<()> {
-/// let client = Client::new(RerankerConfig {
-///     api_key: Some(SecretString::from("your-api-key")),
-///     base_url: "https://api.deepinfra.com/v1".to_string(),
-///     timeout: Duration::from_secs(10),
-///     dialect: ProviderDialect::DeepInfra,
-///     model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
-///     instruction: None,
-///     requests_per_minute: 1000,
-///     max_concurrent_requests: 50,
-///     tokens_per_minute: 1_000_000,
-/// })?;
-/// # Ok(())
-/// # }
-/// ```
 #[derive(Clone)]
 pub struct Client {
-    client: ApiClient,
-    model: String,
+    #[cfg_attr(not(any(test, feature = "local")), allow(dead_code))]
+    model_family: ModelFamily,
     instruction: Option<String>,
-    dialect: ProviderDialect,
+    backend: Backend,
 }
 
-/// Internal representation of the reranking API response.
+#[derive(Clone)]
+enum Backend {
+    Remote(RemoteClient),
+    #[cfg(feature = "local")]
+    Local(LocalRerankerClient),
+}
+
+#[derive(Clone)]
+struct RemoteClient {
+    client: ApiClient,
+    model: String,
+    dialect: Dialect,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct RerankApiResponse {
-    /// Relevance scores for each document
     scores: Vec<f64>,
-    /// Optional token usage information
     #[serde(default)]
     input_tokens: Option<i64>,
 }
@@ -207,43 +137,65 @@ struct OpenAiRerankRequest<'a> {
 }
 
 impl Client {
-    /// Create a new reranking client from configuration.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Configuration parameters for the client
-    ///
-    /// # Returns
-    ///
-    /// Returns a configured client ready to make reranking requests.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The API key contains invalid characters
-    /// - The HTTP client cannot be constructed
-    ///
-    /// # Example
-    ///
-    /// ```rust,no_run
-    /// use std::time::Duration;
-    /// use secrecy::SecretString;
-    /// use seasoning::embedding::ProviderDialect;
-    /// use seasoning::reranker::{Client, RerankerConfig};
-    ///
-    /// # fn example() -> seasoning::Result<()> {
-    /// let client = Client::new(RerankerConfig {
-    ///     api_key: Some(SecretString::from("your-api-key")),
-    ///     base_url: "https://api.deepinfra.com/v1".to_string(),
-    ///     timeout: Duration::from_secs(10),
-    ///     dialect: ProviderDialect::DeepInfra,
-    ///     model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
-    ///     instruction: None,
-    /// })?;
-    /// # Ok(())
-    /// # }
-    /// ```
     pub fn new(config: RerankerConfig) -> Result<Self> {
+        validate_reranker_family(config.model_family)?;
+
+        match config.dialect {
+            Dialect::OpenAI | Dialect::DeepInfra => {
+                let model_family = config.model_family;
+                let instruction = config.instruction.clone();
+                let remote = RemoteClient::new(config)?;
+                Ok(Self {
+                    model_family,
+                    instruction,
+                    backend: Backend::Remote(remote),
+                })
+            }
+            Dialect::LlamaCpp => {
+                #[cfg(feature = "local")]
+                {
+                    Ok(Self {
+                        model_family: config.model_family,
+                        instruction: config.instruction,
+                        backend: Backend::Local(LocalRerankerClient::new(
+                            config.model_family,
+                            &config.model,
+                        )?),
+                    })
+                }
+                #[cfg(not(feature = "local"))]
+                {
+                    let _ = config;
+                    Err(Error::LocalFeatureRequired {
+                        dialect: Dialect::LlamaCpp.to_string(),
+                    })
+                }
+            }
+        }
+    }
+
+    #[cfg_attr(not(any(test, feature = "local")), allow(dead_code))]
+    fn local_instruction(&self) -> String {
+        self.instruction
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+            .unwrap_or_else(|| self.model_family.default_query_instruction().to_string())
+    }
+
+    #[cfg_attr(not(any(test, feature = "local")), allow(dead_code))]
+    fn format_local_qwen3_input(&self, query: &RerankQuery, document: &RerankDocument) -> String {
+        let instruction = self.local_instruction();
+        format!(
+            "Instruct: {instruction}\nQuery: {}\nDocument: {}",
+            query.text, document.text
+        )
+    }
+}
+
+impl RemoteClient {
+    fn new(config: RerankerConfig) -> Result<Self> {
         let api_config = ApiClientConfig {
             base_url: config.base_url.clone(),
             api_key: config.api_key.clone(),
@@ -258,31 +210,13 @@ impl Client {
         Ok(Self {
             client,
             model: config.model,
-            instruction: config.instruction,
             dialect: config.dialect,
         })
     }
 
-    /// Rerank documents using the DeepInfra API.
-    ///
-    /// # Arguments
-    ///
-    /// * `query` - The search query to rank documents against
-    /// * `documents` - Slice of document texts to rank
-    ///
-    /// # Returns
-    ///
-    /// Returns relevance scores clamped to [0.0, 1.0], one per document.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if:
-    /// - The documents slice is empty
-    /// - The query is empty or contains only whitespace
-    /// - The API request fails
-    /// - The response cannot be parsed
     async fn rerank_deepinfra(
         &self,
+        instruction: Option<&str>,
         query: &RerankQuery,
         documents: &[RerankDocument],
     ) -> Result<Vec<f64>> {
@@ -296,7 +230,7 @@ impl Client {
         let payload = RerankDeepInfraRequest {
             queries: vec![query.text.as_str(); documents.len()],
             documents: documents.iter().map(|d| d.text.as_str()).collect(),
-            instruction: self.instruction.as_deref(),
+            instruction,
         };
 
         let token_count = estimate_token_count(query, documents);
@@ -308,6 +242,8 @@ impl Client {
         if let Some(input_tokens) = response.input_tokens {
             debug!("Reranking used {} input tokens", input_tokens);
         }
+
+        ensure_score_count(response.scores.len(), documents.len())?;
 
         Ok(response
             .scores
@@ -340,29 +276,92 @@ impl Client {
             .post_json("/rerank", &payload, token_count)
             .await?;
 
-        let mut scores = vec![0.0f64; documents.len()];
-        for item in response.data {
-            if let Some(score) = scores.get_mut(item.index) {
-                *score = item.relevance_score.clamp(0.0, 1.0);
-            }
-        }
-
-        Ok(scores)
+        order_openai_scores(response.data, documents.len())
     }
 }
 
 #[async_trait]
 impl RerankingProvider for Client {
     async fn rerank(&self, query: &RerankQuery, documents: &[RerankDocument]) -> Result<Vec<f64>> {
-        match self.dialect {
-            ProviderDialect::DeepInfra => self.rerank_deepinfra(query, documents).await,
-            ProviderDialect::OpenAI => self.rerank_openai(query, documents).await,
+        match &self.backend {
+            Backend::Remote(client) => match client.dialect {
+                Dialect::DeepInfra => {
+                    client
+                        .rerank_deepinfra(self.instruction.as_deref(), query, documents)
+                        .await
+                }
+                Dialect::OpenAI => client.rerank_openai(query, documents).await,
+                Dialect::LlamaCpp => {
+                    unreachable!("local execution is handled outside RemoteClient")
+                }
+            },
+            #[cfg(feature = "local")]
+            Backend::Local(client) => {
+                if documents.is_empty() {
+                    return Ok(Vec::new());
+                }
+                if query.text.trim().is_empty() {
+                    return Err(Error::EmptyRerankQuery);
+                }
+
+                let formatted = documents
+                    .iter()
+                    .map(|document| self.format_local_qwen3_input(query, document))
+                    .collect::<Vec<_>>();
+                let scores = client.score_texts(&formatted).await?;
+                ensure_score_count(scores.len(), documents.len())?;
+                Ok(scores)
+            }
         }
     }
 }
 
+fn validate_reranker_family(model_family: ModelFamily) -> Result<()> {
+    if model_family != ModelFamily::Qwen3 {
+        return Err(Error::UnsupportedConfiguration {
+            message: "reranking currently supports ModelFamily::Qwen3 only".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+fn ensure_score_count(scores: usize, inputs: usize) -> Result<()> {
+    if scores != inputs {
+        return Err(Error::RerankScoreCountMismatch { scores, inputs });
+    }
+
+    Ok(())
+}
+
+fn order_openai_scores(items: Vec<OpenAiRerankData>, inputs: usize) -> Result<Vec<f64>> {
+    ensure_score_count(items.len(), inputs)?;
+
+    let mut scores = vec![None; inputs];
+    for item in items {
+        let slot = scores
+            .get_mut(item.index)
+            .ok_or(Error::InvalidRerankScoreIndex {
+                index: item.index,
+                inputs,
+            })?;
+        if slot.is_some() {
+            return Err(Error::InvalidRerankScoreIndex {
+                index: item.index,
+                inputs,
+            });
+        }
+        *slot = Some(item.relevance_score.clamp(0.0, 1.0));
+    }
+
+    scores
+        .into_iter()
+        .enumerate()
+        .map(|(index, score)| score.ok_or(Error::InvalidRerankScoreIndex { index, inputs }))
+        .collect()
+}
+
 fn estimate_token_count(query: &RerankQuery, documents: &[RerankDocument]) -> u32 {
-    // DeepInfra reranking payload repeats the query once per document.
     let query_total = (query.token_count as u32).saturating_mul(documents.len() as u32);
     let docs_total = documents
         .iter()
@@ -406,7 +405,8 @@ mod tests {
             api_key: None,
             base_url: mock_server.uri(),
             timeout: Duration::from_secs(10),
-            dialect: ProviderDialect::DeepInfra,
+            dialect: Dialect::DeepInfra,
+            model_family: ModelFamily::Qwen3,
             model: "test-model".to_string(),
             instruction: None,
             requests_per_minute: 1000,
@@ -439,6 +439,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rerank_deepinfra_rejects_score_count_mismatch() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/inference/test-model"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "scores": [0.9]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: mock_server.uri(),
+            timeout: Duration::from_secs(10),
+            dialect: Dialect::DeepInfra,
+            model_family: ModelFamily::Qwen3,
+            model: "test-model".to_string(),
+            instruction: None,
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        })
+        .unwrap();
+
+        let query = RerankQuery {
+            text: "q".to_string(),
+            token_count: 1,
+        };
+        let documents = vec![
+            RerankDocument {
+                text: "a".to_string(),
+                token_count: 1,
+            },
+            RerankDocument {
+                text: "b".to_string(),
+                token_count: 1,
+            },
+        ];
+
+        let err = client.rerank(&query, &documents).await.unwrap_err();
+        assert!(matches!(
+            err,
+            Error::RerankScoreCountMismatch {
+                scores: 1,
+                inputs: 2
+            }
+        ));
+    }
+
+    #[tokio::test]
     async fn rerank_deepinfra_requires_query() {
         let mock_server = MockServer::start().await;
 
@@ -446,7 +497,8 @@ mod tests {
             api_key: None,
             base_url: mock_server.uri(),
             timeout: Duration::from_secs(10),
-            dialect: ProviderDialect::DeepInfra,
+            dialect: Dialect::DeepInfra,
+            model_family: ModelFamily::Qwen3,
             model: "test-model".to_string(),
             instruction: None,
             requests_per_minute: 1000,
@@ -485,7 +537,8 @@ mod tests {
             api_key: Some(SecretString::from("test_key")),
             base_url: mock_server.uri(),
             timeout: Duration::from_secs(10),
-            dialect: ProviderDialect::DeepInfra,
+            dialect: Dialect::DeepInfra,
+            model_family: ModelFamily::Qwen3,
             model: "test-model".to_string(),
             instruction: None,
             requests_per_minute: 1000,
@@ -504,6 +557,181 @@ mod tests {
         }];
 
         let _ = client.rerank(&query, &documents).await.unwrap();
+    }
+
+    #[test]
+    fn reranker_requires_qwen3_family() {
+        let result = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: "https://api.deepinfra.com/v1".to_string(),
+            timeout: Duration::from_secs(10),
+            dialect: Dialect::DeepInfra,
+            model_family: ModelFamily::Gemma,
+            model: "test-model".to_string(),
+            instruction: None,
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        });
+
+        assert!(matches!(
+            result,
+            Err(Error::UnsupportedConfiguration { .. })
+        ));
+    }
+
+    #[cfg(not(feature = "local"))]
+    #[test]
+    fn llama_cpp_requires_local_feature() {
+        let result = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: String::new(),
+            timeout: Duration::from_secs(1),
+            dialect: Dialect::LlamaCpp,
+            model_family: ModelFamily::Qwen3,
+            model: "hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf"
+                .to_string(),
+            instruction: None,
+            requests_per_minute: 1,
+            max_concurrent_requests: 1,
+            tokens_per_minute: 1,
+        });
+
+        assert!(matches!(result, Err(Error::LocalFeatureRequired { .. })));
+    }
+
+    #[test]
+    fn local_qwen3_instruction_uses_default_and_override() {
+        let default_client = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: "https://api.deepinfra.com/v1".to_string(),
+            timeout: Duration::from_secs(10),
+            dialect: Dialect::DeepInfra,
+            model_family: ModelFamily::Qwen3,
+            model: "test-model".to_string(),
+            instruction: None,
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        })
+        .unwrap();
+        let custom_client = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: "https://api.deepinfra.com/v1".to_string(),
+            timeout: Duration::from_secs(10),
+            dialect: Dialect::DeepInfra,
+            model_family: ModelFamily::Qwen3,
+            model: "test-model".to_string(),
+            instruction: Some("rank docs".to_string()),
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        })
+        .unwrap();
+        let query = RerankQuery {
+            text: "memory safety".to_string(),
+            token_count: 2,
+        };
+        let document = RerankDocument {
+            text: "Rust prevents data races".to_string(),
+            token_count: 4,
+        };
+
+        assert_eq!(
+            default_client.format_local_qwen3_input(&query, &document),
+            format!(
+                "Instruct: {}\nQuery: memory safety\nDocument: Rust prevents data races",
+                ModelFamily::Qwen3.default_query_instruction()
+            )
+        );
+        assert_eq!(
+            custom_client.format_local_qwen3_input(&query, &document),
+            "Instruct: rank docs\nQuery: memory safety\nDocument: Rust prevents data races"
+        );
+    }
+
+    #[cfg(feature = "local")]
+    #[test]
+    fn local_reranker_rejects_unsupported_model() {
+        let result = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: String::new(),
+            timeout: Duration::from_secs(1),
+            dialect: Dialect::LlamaCpp,
+            model_family: ModelFamily::Qwen3,
+            model: "hf:example/unsupported.gguf".to_string(),
+            instruction: None,
+            requests_per_minute: 1,
+            max_concurrent_requests: 1,
+            tokens_per_minute: 1,
+        });
+
+        assert!(matches!(
+            result,
+            Err(Error::UnsupportedLocalModel {
+                kind: "reranking",
+                ..
+            })
+        ));
+    }
+
+    #[tokio::test]
+    async fn rerank_openai_rejects_invalid_index_mapping() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/rerank"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [
+                    { "index": 0, "relevanceScore": 0.8 },
+                    { "index": 3, "relevanceScore": 0.1 },
+                    { "index": 1, "relevanceScore": 0.6 }
+                ]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: mock_server.uri(),
+            timeout: Duration::from_secs(10),
+            dialect: Dialect::OpenAI,
+            model_family: ModelFamily::Qwen3,
+            model: "test-model".to_string(),
+            instruction: None,
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        })
+        .unwrap();
+
+        let query = RerankQuery {
+            text: "q".to_string(),
+            token_count: 1,
+        };
+        let documents = vec![
+            RerankDocument {
+                text: "a".to_string(),
+                token_count: 2,
+            },
+            RerankDocument {
+                text: "b".to_string(),
+                token_count: 2,
+            },
+            RerankDocument {
+                text: "c".to_string(),
+                token_count: 2,
+            },
+        ];
+
+        let err = client.rerank(&query, &documents).await.unwrap_err();
+        assert!(matches!(
+            err,
+            Error::InvalidRerankScoreIndex {
+                index: 3,
+                inputs: 3
+            }
+        ));
     }
 
     #[tokio::test]
@@ -531,7 +759,8 @@ mod tests {
             api_key: None,
             base_url: mock_server.uri(),
             timeout: Duration::from_secs(10),
-            dialect: ProviderDialect::OpenAI,
+            dialect: Dialect::OpenAI,
+            model_family: ModelFamily::Qwen3,
             model: "test-model".to_string(),
             instruction: None,
             requests_per_minute: 1000,
