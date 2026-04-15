@@ -29,12 +29,12 @@
 ---
 
 ### Step 2: Evaluate proof obligations and repo gates
-**Status:** 🟨 In Progress
+**Status:** ✅ Complete
 
-- [x] Confirm the required tests, including adversarial coverage, are present and aligned with the approved contract
+- [x] Assess the required tests, including adversarial coverage, against the approved contract and record any proof gaps
 - [x] Confirm repo gates and verification outputs support the final verdict
 - [x] Reconcile R004 proof-gap feedback by recording missing positive local-construction acceptance evidence in the conformance findings
-- [ ] Reconcile R005 consistency feedback so Step 2 states assessment outcomes (including proof gaps) without claiming full proof closure
+- [x] Reconcile R005 consistency feedback so Step 2 states assessment outcomes (including proof gaps) without claiming full proof closure
 
 ---
 
@@ -90,6 +90,7 @@
 | 2026-04-15 18:02 | Step 2 revised | Recorded proof-obligation coverage gap for missing positive local-construction tests |
 | 2026-04-15 18:04 | Review R005 | code Step 2: REVISE |
 | 2026-04-15 18:04 | Step 2 reopened | Added consistency revision item so Step 2 outcome matches identified proof gaps |
+| 2026-04-15 18:06 | Step 2 revised | Updated proof-obligation checkpoint wording to reflect assessment-with-gaps semantics |
 
 ---
 
@@ -108,5 +109,6 @@
 - 2026-04-15: Required/adversarial proof coverage is present for formatting and failure paths (Gemma/Qwen3 formatting in `src/api.rs`; no-`local` constructor failures in `src/embedding.rs` + `src/reranker.rs`; score-count/index adversarial cases in `src/reranker.rs`), but positive local-construction acceptance tests are currently missing.
 - 2026-04-15: Gate execution evidence captured with `mise format` and `mise test`; while both pass, `mise test` currently runs redundant full suites (`cargo nextest run`, `--features local`, and on Darwin `--features metal`) instead of selecting exactly one platform-appropriate local feature probe.
 - 2026-04-15: R004 revision resolved by recording a proof-obligation gap: current tests cover formatting/failure behavior but do not include positive local-construction acceptance tests for the supported local models.
+- 2026-04-15: R005 revision resolved by rewording Step 2 proof-obligation outcome to an assessment-with-gaps checkpoint rather than a full-coverage confirmation.
 - Suggestion (R004): keep the repo-gate redundancy note because the observed three-suite behavior is accurate and relevant to conformance evidence.
 - Suggestion (R005): carry the same design/test citations into `conformance.md` for an auditable proof-gap trail.
