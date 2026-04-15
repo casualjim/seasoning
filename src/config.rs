@@ -32,8 +32,9 @@
 //! let config: AppConfig = serde_json::from_value(config_json).unwrap();
 //! assert_eq!(config.embedding.dialect, "deepinfra");
 //! assert_eq!(config.embedding.model_family, "qwen3");
-//! // `dialect` values also accept `llamacpp`, `llama-cpp`, and `llama_cpp`
-//! // when converted through `to_embedder_config` / `to_reranker_config`.
+//! // `dialect` values also accept `llamacpp`, `llama-cpp`, `llama_cpp`,
+//! // and `llama.cpp` when converted through `to_embedder_config`
+//! // / `to_reranker_config`.
 //! ```
 
 use std::time::Duration;
@@ -139,7 +140,7 @@ fn parse_provider_dialect(value: &str) -> Result<Dialect> {
     match normalized.as_str() {
         "openai" => Ok(Dialect::OpenAI),
         "deepinfra" => Ok(Dialect::DeepInfra),
-        "llamacpp" | "llama-cpp" | "llama_cpp" => Ok(Dialect::LlamaCpp),
+        "llamacpp" | "llama-cpp" | "llama_cpp" | "llama.cpp" => Ok(Dialect::LlamaCpp),
         _ => Err(Error::InvalidProviderDialect {
             value: value.to_string(),
         }),
