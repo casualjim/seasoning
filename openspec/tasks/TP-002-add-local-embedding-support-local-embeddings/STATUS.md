@@ -79,6 +79,8 @@
 | 2026-04-15 17:00 | Step 2 complete | Added semantic-formatting and validation tests; default and `local` builds validated |
 | 2026-04-15 17:06 | Step 3 complete | Updated README, crate docs, and inline examples; adjacent proof-obligation docs re-verified |
 | 2026-04-15 17:12 | Step 4 complete | `cargo test --all` and `cargo test --all --features local --no-run` passed after formatting Rust sources with `rustfmt` |
+| 2026-04-15 16:55 | Worker iter 1 | done in 2175s, tools: 156 |
+| 2026-04-15 16:55 | Task complete | .DONE created |
 
 ---
 
