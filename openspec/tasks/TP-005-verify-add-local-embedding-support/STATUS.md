@@ -29,11 +29,11 @@
 ---
 
 ### Step 2: Evaluate proof obligations and repo gates
-**Status:** 🟨 In Progress
+**Status:** ✅ Complete
 
 - [x] Confirm the required tests, including adversarial coverage, are present and aligned with the approved contract
 - [x] Confirm repo gates and verification outputs support the final verdict
-- [ ] Reconcile R004 proof-gap feedback by recording missing positive local-construction acceptance evidence in the conformance findings
+- [x] Reconcile R004 proof-gap feedback by recording missing positive local-construction acceptance evidence in the conformance findings
 
 ---
 
@@ -61,6 +61,7 @@
 | Discovery | Disposition | Location |
 |-----------|-------------|----------|
 | Wave 1 modified repo-gate definitions in `mise.toml`, `.mise/tasks/test/_default`, and `.mise/tasks/test/rust`, which are outside TP-004’s approved file scope/edit targets. | Candidate blocking conformance finding (scope breach; remediation required) | `openspec/tasks/TP-004-add-local-embedding-support-retrieval-model-profiles/PROMPT.md`, `mise.toml`, `.mise/tasks/test/_default`, `.mise/tasks/test/rust` |
+| Acceptance proof gap: no positive `--features local` tests assert successful construction for supported Gemma/Qwen3 local embedders or supported Qwen3 local reranker. | Candidate conformance finding (proof-obligation gap; remediation required) | `openspec/changes/add-local-embedding-support/design.md` (Acceptance), `src/embedding.rs` tests, `src/reranker.rs` tests |
 
 ---
 
@@ -84,6 +85,7 @@
 | 2026-04-15 17:59 | Step 2 completed | Proof obligations and repo gate evidence reviewed; redundancy finding prepared for conformance report |
 | 2026-04-15 18:00 | Review R004 | code Step 2: REVISE |
 | 2026-04-15 18:00 | Step 2 reopened | Added revision item for missing positive local-construction acceptance proof evidence |
+| 2026-04-15 18:02 | Step 2 revised | Recorded proof-obligation coverage gap for missing positive local-construction tests |
 
 ---
 
@@ -101,4 +103,5 @@
 - 2026-04-15: Preservation/non-regression review found remote entry points remain (`embedding::Client`, `reranker::Client`), async APIs are preserved while local execution is internalized, and docs/examples were updated (`README.md`, `src/lib.rs`, module docs). Proof strength is reduced by repo-gate wrapper drift: `mise test` now runs multiple nextest suites (`default`, `local`, and Darwin `metal`) instead of selecting a single platform-appropriate local feature probe.
 - 2026-04-15: Required/adversarial proof coverage is present for formatting and failure paths (Gemma/Qwen3 formatting in `src/api.rs`; no-`local` constructor failures in `src/embedding.rs` + `src/reranker.rs`; score-count/index adversarial cases in `src/reranker.rs`), but positive local-construction acceptance tests are currently missing.
 - 2026-04-15: Gate execution evidence captured with `mise format` and `mise test`; while both pass, `mise test` currently runs redundant full suites (`cargo nextest run`, `--features local`, and on Darwin `--features metal`) instead of selecting exactly one platform-appropriate local feature probe.
+- 2026-04-15: R004 revision resolved by recording a proof-obligation gap: current tests cover formatting/failure behavior but do not include positive local-construction acceptance tests for the supported local models.
 - Suggestion (R004): keep the repo-gate redundancy note because the observed three-suite behavior is accurate and relevant to conformance evidence.
