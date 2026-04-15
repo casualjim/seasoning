@@ -8,7 +8,7 @@ use crate::BatchItem;
 use crate::EmbeddingProvider;
 use crate::batching::TokenAwareBatcher;
 use crate::embedding::EmbeddingInput;
-use crate::{Error, Result};
+use crate::{EmbeddingRole, Error, Result};
 
 pub struct EmbeddingResult<M> {
     pub items: Vec<M>,
@@ -30,7 +30,9 @@ async fn embed_batch<M>(
     let mut items = Vec::with_capacity(batch.len());
     for item in batch {
         inputs.push(EmbeddingInput {
+            role: EmbeddingRole::Document,
             text: item.text,
+            title: None,
             token_count: item.token_count,
         });
         items.push(item.meta);
