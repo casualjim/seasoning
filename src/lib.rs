@@ -3,6 +3,9 @@
 //! Retrieval-focused embedding and reranking infrastructure with explicit model
 //! semantics, rate limiting, retries, and optional local llama.cpp execution.
 //!
+//! Config-driven local setups accept the `llama.cpp`, `llamacpp`, `llama-cpp`,
+//! or `llama_cpp` dialect spellings when converting into [`Dialect::LlamaCpp`].
+//!
 //! Seasoning separates backend/runtime selection from retrieval formatting:
 //! [`Dialect`] selects transport or local execution, [`ModelFamily`] selects
 //! retrieval-family formatting, and [`EmbeddingRole`] identifies whether an

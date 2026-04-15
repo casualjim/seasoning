@@ -14,7 +14,7 @@ Retrieval-focused embedding and reranking infrastructure for Rust.
 
 Seasoning now separates **backend dialect** from **model-family behavior**:
 
-- `Dialect::{OpenAI, DeepInfra, LlamaCpp}` chooses the transport/runtime (config parsing accepts `llamacpp`, `llama-cpp`, or `llama_cpp`).
+- `Dialect::{OpenAI, DeepInfra, LlamaCpp}` chooses the transport/runtime (config parsing accepts `llama.cpp`, `llamacpp`, `llama-cpp`, or `llama_cpp`).
 - `ModelFamily::{Gemma, Qwen3}` chooses retrieval formatting semantics.
 - `EmbeddingRole::{Query, Document}` tells the crate how to format each embedding input.
 
@@ -182,7 +182,7 @@ let reranker = RerankerClient::new(RerankerConfig {
 # Ok::<(), seasoning::Error>(())
 ```
 
-Supported local GGUF artifacts are intentionally narrow for this change, and unsupported local models fail during client construction:
+Supported local GGUF artifacts are intentionally narrow for this change, and unsupported local models fail during client construction. Config-driven setups may spell the local dialect as `llama.cpp`, `llamacpp`, `llama-cpp`, or `llama_cpp`:
 
 - `hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf`
 - `hf:Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf`

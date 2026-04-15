@@ -1,10 +1,10 @@
 # TP-004: add-local-embedding-support / retrieval-model-profiles — Status
 
-**Current Step:** Step 3: Documentation and examples
+**Current Step:** Step 4: Repo gates
 **Status:** 🟡 In Progress
 **Last Updated:** 2026-04-15
 **Review Level:** 2
-**Review Counter:** 4
+**Review Counter:** 6
 **Iteration:** 1
 **Size:** M
 
@@ -45,15 +45,15 @@
 ---
 
 ### Step 3: Documentation and examples
-**Status:** 🟨 In Progress
+**Status:** ✅ Complete
 
-- [ ] Update the required docs and examples for this capability slice
-- [ ] Review adjacent docs or examples listed in the proof obligations and update them if affected
+- [x] Update the required docs and examples for this capability slice
+- [x] Review adjacent docs or examples listed in the proof obligations and update them if affected
 
 ---
 
 ### Step 4: Repo gates
-**Status:** ⬜ Not Started
+**Status:** 🟨 In Progress
 
 - [ ] Run the required repo gates and leave the repository in a fully passing state
 
@@ -86,6 +86,10 @@
 | 2026-04-15 17:28 | Step 2 started | Tests and targeted validation |
 | 2026-04-15 17:34 | Step 2 completed | Added config alias coverage and validated default/local test paths with raw cargo runs |
 | 2026-04-15 17:34 | Step 3 started | Documentation and examples |
+| 2026-04-15 17:38 | Steering applied | Remaining validation switched to mise-only tasks; prior raw cargo test deviation logged |
+| 2026-04-15 17:40 | Adjacent docs reviewed | Proposal/design remained aligned; no contract-doc edits required |
+| 2026-04-15 17:40 | Step 3 completed | README, crate docs, and config docs now describe canonical llama.cpp alias handling |
+| 2026-04-15 17:40 | Step 4 started | Repo gates |
 
 ---
 
@@ -99,7 +103,11 @@
 
 - Plan review R003: explicitly verify both default-feature and `local`-feature paths in Step 2 because `mise test` maps to `cargo test --all` and does not enable `--features local`.
 - Plan review R003 suggestion: add focused config-conversion coverage for `dialect = "llama.cpp"` in both embedding and reranker config conversion paths.
+- Repo instruction deviation (Iteration 1): Step 2 validation used raw `cargo test` / `cargo test --features local` because no `mise` task exposes feature-selective test runs; do not repeat raw toolchain usage when an equivalent `mise` task exists.
+- Repo instruction follow-up (Iteration 1): all remaining repo validation in this batch must use `mise` tasks only.
 | 2026-04-15 17:18 | Review R001 | plan Step 1: APPROVE |
 | 2026-04-15 17:23 | Review R002 | code Step 1: APPROVE |
 | 2026-04-15 17:25 | Review R003 | plan Step 2: REVISE |
 | 2026-04-15 17:26 | Review R004 | plan Step 2: APPROVE |
+| 2026-04-15 17:30 | Review R005 | code Step 2: APPROVE |
+| 2026-04-15 17:31 | Review R006 | plan Step 3: APPROVE |
