@@ -44,11 +44,11 @@ use serde::{Deserialize, Serialize};
 use tracing::debug;
 
 use crate::RerankingProvider;
+#[cfg(feature = "local")]
+use crate::local::LocalRerankerClient;
 use crate::reqwestx::{ApiClient, ApiClientConfig};
 use crate::{Dialect, Error, ModelFamily, Result};
 use crate::{RerankDocument, RerankQuery};
-#[cfg(feature = "local")]
-use crate::local::LocalRerankerClient;
 
 /// Configuration for the reranking client.
 #[derive(Debug, Clone)]
@@ -77,6 +77,7 @@ pub struct RerankerConfig {
 
 #[derive(Clone)]
 pub struct Client {
+    #[cfg_attr(not(any(test, feature = "local")), allow(dead_code))]
     model_family: ModelFamily,
     instruction: Option<String>,
     backend: Backend,
@@ -148,7 +149,7 @@ impl Client {
                     instruction,
                     backend: Backend::Remote(remote),
                 })
-            },
+            }
             Dialect::LlamaCpp => {
                 #[cfg(feature = "local")]
                 {
@@ -172,6 +173,7 @@ impl Client {
         }
     }
 
+    #[cfg_attr(not(any(test, feature = "local")), allow(dead_code))]
     fn local_instruction(&self) -> String {
         self.instruction
             .as_deref()
@@ -181,6 +183,7 @@ impl Client {
             .unwrap_or_else(|| self.model_family.default_query_instruction().to_string())
     }
 
+    #[cfg_attr(not(any(test, feature = "local")), allow(dead_code))]
     fn format_local_qwen3_input(&self, query: &RerankQuery, document: &RerankDocument) -> String {
         let instruction = self.local_instruction();
         format!(
@@ -265,8 +268,10 @@ impl RemoteClient {
         };
 
         let token_count = estimate_token_count_openai(query, documents);
-        let response: OpenAiRerankResponse =
-            self.client.post_json("/rerank", &payload, token_count).await?;
+        let response: OpenAiRerankResponse = self
+            .client
+            .post_json("/rerank", &payload, token_count)
+            .await?;
 
         let mut scores = vec![0.0f64; documents.len()];
         for item in response.data {
@@ -284,11 +289,15 @@ impl RerankingProvider for Client {
     async fn rerank(&self, query: &RerankQuery, documents: &[RerankDocument]) -> Result<Vec<f64>> {
         match &self.backend {
             Backend::Remote(client) => match client.dialect {
-                Dialect::DeepInfra => client
-                    .rerank_deepinfra(self.instruction.as_deref(), query, documents)
-                    .await,
+                Dialect::DeepInfra => {
+                    client
+                        .rerank_deepinfra(self.instruction.as_deref(), query, documents)
+                        .await
+                }
                 Dialect::OpenAI => client.rerank_openai(query, documents).await,
-                Dialect::LlamaCpp => unreachable!("local execution is handled outside RemoteClient"),
+                Dialect::LlamaCpp => {
+                    unreachable!("local execution is handled outside RemoteClient")
+                }
             },
             #[cfg(feature = "local")]
             Backend::Local(client) => {
@@ -481,7 +490,10 @@ mod tests {
             tokens_per_minute: 1_000_000,
         });
 
-        assert!(matches!(result, Err(Error::UnsupportedConfiguration { .. })));
+        assert!(matches!(
+            result,
+            Err(Error::UnsupportedConfiguration { .. })
+        ));
     }
 
     #[cfg(not(feature = "local"))]

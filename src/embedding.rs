@@ -46,9 +46,9 @@ use tracing::debug;
 
 use crate::EmbeddingProvider;
 use crate::Result;
-use crate::reqwestx::{ApiClient, ApiClientConfig};
 #[cfg(feature = "local")]
 use crate::local::LocalEmbeddingClient;
+use crate::reqwestx::{ApiClient, ApiClientConfig};
 pub use crate::{
     Dialect, EmbedOutput, EmbeddingInput, EmbeddingRole, ModelFamily, ProviderDialect,
 };
@@ -129,7 +129,7 @@ impl Client {
                     query_instruction,
                     backend: Backend::Remote(remote),
                 })
-            },
+            }
             Dialect::LlamaCpp => {
                 #[cfg(feature = "local")]
                 {
@@ -194,7 +194,11 @@ impl RemoteClient {
         })
     }
 
-    async fn embed_texts(&self, batch_texts: &[String], estimated_tokens: u32) -> Result<EmbedOutput> {
+    async fn embed_texts(
+        &self,
+        batch_texts: &[String],
+        estimated_tokens: u32,
+    ) -> Result<EmbedOutput> {
         if batch_texts.is_empty() {
             return Ok(EmbedOutput {
                 embeddings: Vec::new(),
@@ -291,8 +295,7 @@ mod tests {
             timeout: Duration::from_secs(1),
             dialect: Dialect::LlamaCpp,
             model_family: ModelFamily::Gemma,
-            model: "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf"
-                .to_string(),
+            model: "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf".to_string(),
             query_instruction: None,
             embedding_dim: 768,
             requests_per_minute: 1,
@@ -300,7 +303,10 @@ mod tests {
             tokens_per_minute: 1,
         });
 
-        assert!(matches!(result, Err(crate::Error::LocalFeatureRequired { .. })));
+        assert!(matches!(
+            result,
+            Err(crate::Error::LocalFeatureRequired { .. })
+        ));
     }
 
     #[cfg(feature = "local")]

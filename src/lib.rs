@@ -93,8 +93,8 @@ pub mod service;
 
 pub use api::{
     AddDecision, BatchItem, BatchingStrategy, Dialect, EmbedOutput, EmbeddingInput,
-    EmbeddingProvider, EmbeddingRole, ModelFamily, ProviderDialect, RerankDocument,
-    RerankQuery, RerankingProvider,
+    EmbeddingProvider, EmbeddingRole, ModelFamily, ProviderDialect, RerankDocument, RerankQuery,
+    RerankingProvider,
 };
 pub use config::*;
 pub use error::{Error, Result};

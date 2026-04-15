@@ -93,7 +93,9 @@ impl LocalEmbeddingClient {
             })
             .map_err(|_| Error::LocalRuntimeChannelClosed)?;
 
-        response_rx.await.map_err(|_| Error::LocalRuntimeChannelClosed)?
+        response_rx
+            .await
+            .map_err(|_| Error::LocalRuntimeChannelClosed)?
     }
 }
 
@@ -136,7 +138,9 @@ impl LocalRerankerClient {
             })
             .map_err(|_| Error::LocalRuntimeChannelClosed)?;
 
-        response_rx.await.map_err(|_| Error::LocalRuntimeChannelClosed)?
+        response_rx
+            .await
+            .map_err(|_| Error::LocalRuntimeChannelClosed)?
     }
 }
 
@@ -168,20 +172,29 @@ impl LocalEmbeddingRuntime {
         let tokens = tokenize_nonempty(&self.model, text)?;
         let mut context = self
             .model
-            .new_context(llama_backend()?, LlamaContextParams::default().with_embeddings(true))
+            .new_context(
+                llama_backend()?,
+                LlamaContextParams::default().with_embeddings(true),
+            )
             .map_err(|err| Error::LocalRuntime {
                 message: format!("failed to create llama.cpp embedding context: {err}"),
             })?;
         let mut batch = LlamaBatch::new(tokens.len(), 1);
-        batch.add_sequence(&tokens, 0, false).map_err(|err| Error::LocalRuntime {
-            message: format!("failed to prepare llama.cpp embedding batch: {err}"),
-        })?;
-        context.encode(&mut batch).map_err(|err| Error::LocalRuntime {
-            message: format!("llama.cpp embedding encode failed: {err}"),
-        })?;
-        let embedding = context.embeddings_seq_ith(0).map_err(|err| Error::LocalRuntime {
-            message: format!("failed to read llama.cpp embedding output: {err}"),
-        })?;
+        batch
+            .add_sequence(&tokens, 0, false)
+            .map_err(|err| Error::LocalRuntime {
+                message: format!("failed to prepare llama.cpp embedding batch: {err}"),
+            })?;
+        context
+            .encode(&mut batch)
+            .map_err(|err| Error::LocalRuntime {
+                message: format!("llama.cpp embedding encode failed: {err}"),
+            })?;
+        let embedding = context
+            .embeddings_seq_ith(0)
+            .map_err(|err| Error::LocalRuntime {
+                message: format!("failed to read llama.cpp embedding output: {err}"),
+            })?;
         Ok(embedding.to_vec())
     }
 }
@@ -222,15 +235,21 @@ impl LocalRerankerRuntime {
                 message: format!("failed to create llama.cpp reranker context: {err}"),
             })?;
         let mut batch = LlamaBatch::new(tokens.len(), 1);
-        batch.add_sequence(&tokens, 0, false).map_err(|err| Error::LocalRuntime {
-            message: format!("failed to prepare llama.cpp reranker batch: {err}"),
-        })?;
-        context.encode(&mut batch).map_err(|err| Error::LocalRuntime {
-            message: format!("llama.cpp reranker encode failed: {err}"),
-        })?;
-        let score = context.embeddings_seq_ith(0).map_err(|err| Error::LocalRuntime {
-            message: format!("failed to read llama.cpp reranker score: {err}"),
-        })?;
+        batch
+            .add_sequence(&tokens, 0, false)
+            .map_err(|err| Error::LocalRuntime {
+                message: format!("failed to prepare llama.cpp reranker batch: {err}"),
+            })?;
+        context
+            .encode(&mut batch)
+            .map_err(|err| Error::LocalRuntime {
+                message: format!("llama.cpp reranker encode failed: {err}"),
+            })?;
+        let score = context
+            .embeddings_seq_ith(0)
+            .map_err(|err| Error::LocalRuntime {
+                message: format!("failed to read llama.cpp reranker score: {err}"),
+            })?;
 
         score
             .first()
@@ -298,13 +317,20 @@ fn resolve_model_path(model: &str) -> Result<PathBuf> {
 }
 
 fn load_model(model_path: &PathBuf) -> Result<LlamaModel> {
-    LlamaModel::load_from_file(llama_backend()?, model_path, &LlamaModelParams::default())
-        .map_err(|err| Error::LocalRuntime {
-            message: format!("failed to load llama.cpp model from '{}': {err}", model_path.display()),
-        })
+    LlamaModel::load_from_file(llama_backend()?, model_path, &LlamaModelParams::default()).map_err(
+        |err| Error::LocalRuntime {
+            message: format!(
+                "failed to load llama.cpp model from '{}': {err}",
+                model_path.display()
+            ),
+        },
+    )
 }
 
-fn tokenize_nonempty(model: &LlamaModel, text: &str) -> Result<Vec<llama_cpp_2::token::LlamaToken>> {
+fn tokenize_nonempty(
+    model: &LlamaModel,
+    text: &str,
+) -> Result<Vec<llama_cpp_2::token::LlamaToken>> {
     let tokens = model
         .str_to_token(text, AddBos::Always)
         .map_err(|err| Error::LocalRuntime {

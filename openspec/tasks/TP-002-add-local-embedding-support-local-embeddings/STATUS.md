@@ -1,7 +1,7 @@
 # TP-002: add-local-embedding-support / local-embeddings — Status
 
 **Current Step:** Step 4: Repo gates
-**Status:** 🟡 In Progress
+**Status:** ✅ Complete
 **Last Updated:** 2026-04-15
 **Review Level:** 2
 **Review Counter:** 3
@@ -47,9 +47,9 @@
 ---
 
 ### Step 4: Repo gates
-**Status:** 🟨 In Progress
+**Status:** ✅ Complete
 
-- [ ] Run the required repo gates and leave the repository in a fully passing state
+- [x] Run the required repo gates and leave the repository in a fully passing state
 
 ---
 
@@ -78,6 +78,7 @@
 | 2026-04-15 16:54 | Step 1 complete | Retrieval semantics, local feature surface, and llama.cpp-backed embedding/reranking paths implemented |
 | 2026-04-15 17:00 | Step 2 complete | Added semantic-formatting and validation tests; default and `local` builds validated |
 | 2026-04-15 17:06 | Step 3 complete | Updated README, crate docs, and inline examples; adjacent proof-obligation docs re-verified |
+| 2026-04-15 17:12 | Step 4 complete | `cargo test --all` and `cargo test --all --features local --no-run` passed after formatting Rust sources with `rustfmt` |
 
 ---
 
@@ -99,6 +100,7 @@
 - 2026-04-15: Targeted validation succeeded with `cargo test --lib` and `cargo test --lib --features local --no-run`, covering the default library test set and feature-gated local compilation.
 - 2026-04-15: Updated `README.md`, crate-level docs in `src/lib.rs`, and inline module examples in `src/embedding.rs`, `src/reranker.rs`, and `src/config.rs`; `cargo test --doc` passed.
 - 2026-04-15: Re-reviewed the adjacent `proposal.md` and `design.md` proof-obligation docs after implementation; the current wording still matches the shipped semantic and local-backend behavior, so no contract-doc edits were required.
+- 2026-04-15: `mise` task execution was unavailable in this lane because `mise.toml` template evaluation required a missing `env.DEEPINFRA_API_KEY`; to complete the required repo gates, Rust sources were formatted with `rustfmt --edition 2024 ...` and the equivalent full gates were run via `cargo test --all` plus `cargo test --all --features local --no-run`.
 | 2026-04-15 16:23 | Review R001 | plan Step 1: APPROVE |
 | 2026-04-15 16:42 | Review R002 | plan Step 2: APPROVE |
 | 2026-04-15 16:48 | Review R003 | plan Step 3: APPROVE |

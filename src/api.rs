@@ -99,7 +99,7 @@ impl ModelFamily {
                     Some(title) => format!("{title}\n{}", input.text),
                     None => input.text.clone(),
                 }
-            },
+            }
         }
     }
 }
