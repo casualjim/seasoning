@@ -4,7 +4,7 @@
 **Status:** 🟡 In Progress
 **Last Updated:** 2026-04-15
 **Review Level:** 2
-**Review Counter:** 0
+**Review Counter:** 1
 **Iteration:** 1
 **Size:** M
 
@@ -23,9 +23,9 @@
 ### Step 1: Implement the approved capability slice
 **Status:** 🟨 In Progress
 
-- [ ] Apply the requested delta for this capability inside the approved module ownership and edit surface
-- [ ] Implement the approved behavioral semantics and exact failure or edge-case semantics
-- [ ] Preserve all stated constraints and do not alter interfaces beyond the approved delta
+- [ ] Implement the semantic embedding contract with explicit role/title/query-instruction handling across the approved public API surface
+- [ ] Enforce construction-time validation and exact edge-case semantics for dialect/family compatibility, local feature gating, and supported GGUF model scope
+- [ ] Preserve async public APIs while routing local llama.cpp embedding and reranking through internal blocking execution with stable score/input correspondence
 
 ---
 
@@ -56,6 +56,7 @@
 
 | # | Type | Step | Verdict | File |
 |---|------|------|---------|------|
+| 1 | plan | 1 | REVISE | .reviews/R001-plan-step1.md |
 
 ---
 
@@ -75,6 +76,7 @@
 | 2026-04-15 16:55 | Step 0 started | Preflight |
 | 2026-04-15 16:58 | Step 0 completed | Contract references and edit surface confirmed |
 | 2026-04-15 16:58 | Step 1 started | Implementation |
+| 2026-04-15 16:59 | Review R001 | plan Step 1: REVISE |
 
 ---
 
@@ -86,4 +88,5 @@
 
 ## Notes
 
-*Reserved for execution notes*
+- Step 1 plan hydrated after R001 to explicitly cover semantic embedding formatting, construction-time validation/model allowlists, and async-preserving local execution.
+- Step 1 implementation must keep query-only instruction application, Gemma `title: none | text: ...` formatting, and local reranker score/index correspondence visible as contract-critical outcomes ahead of Step 2 verification.
