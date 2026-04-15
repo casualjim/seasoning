@@ -1,4 +1,40 @@
 //! Document reranking based on query relevance.
+//!
+//! ```rust,no_run
+//! use std::time::Duration;
+//!
+//! use secrecy::SecretString;
+//! use seasoning::RerankingProvider;
+//! use seasoning::embedding::{Dialect, ModelFamily};
+//! use seasoning::reranker::{Client, RerankerConfig};
+//!
+//! # async fn example() -> seasoning::Result<()> {
+//! let client = Client::new(RerankerConfig {
+//!     api_key: Some(SecretString::from("your-api-key")),
+//!     base_url: "https://api.deepinfra.com/v1".to_string(),
+//!     timeout: Duration::from_secs(10),
+//!     dialect: Dialect::DeepInfra,
+//!     model_family: ModelFamily::Qwen3,
+//!     model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
+//!     instruction: None,
+//!     requests_per_minute: 1000,
+//!     max_concurrent_requests: 50,
+//!     tokens_per_minute: 1_000_000,
+//! })?;
+//!
+//! let query = seasoning::RerankQuery {
+//!     text: "memory-safe systems programming".to_string(),
+//!     token_count: 4,
+//! };
+//! let documents = vec![seasoning::RerankDocument {
+//!     text: "Rust uses ownership and borrowing".to_string(),
+//!     token_count: 6,
+//! }];
+//!
+//! let _ = client.rerank(&query, &documents).await?;
+//! # Ok(())
+//! # }
+//! ```
 
 use std::time::Duration;
 

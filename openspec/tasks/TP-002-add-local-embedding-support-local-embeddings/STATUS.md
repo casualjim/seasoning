@@ -1,10 +1,10 @@
 # TP-002: add-local-embedding-support / local-embeddings — Status
 
-**Current Step:** Step 3: Documentation and examples
+**Current Step:** Step 4: Repo gates
 **Status:** 🟡 In Progress
 **Last Updated:** 2026-04-15
 **Review Level:** 2
-**Review Counter:** 2
+**Review Counter:** 3
 **Iteration:** 1
 **Size:** M
 
@@ -39,15 +39,15 @@
 ---
 
 ### Step 3: Documentation and examples
-**Status:** 🟨 In Progress
+**Status:** ✅ Complete
 
-- [ ] Update the required docs and examples for this capability slice
-- [ ] Review adjacent docs or examples listed in the proof obligations and update them if affected
+- [x] Update the required docs and examples for this capability slice
+- [x] Review adjacent docs or examples listed in the proof obligations and update them if affected
 
 ---
 
 ### Step 4: Repo gates
-**Status:** ⬜ Not Started
+**Status:** 🟨 In Progress
 
 - [ ] Run the required repo gates and leave the repository in a fully passing state
 
@@ -77,6 +77,7 @@
 | 2026-04-15 16:18 | Step 1 hydrated | Expanded implementation outcomes around semantic retrieval API, local llama.cpp support, and validation semantics |
 | 2026-04-15 16:54 | Step 1 complete | Retrieval semantics, local feature surface, and llama.cpp-backed embedding/reranking paths implemented |
 | 2026-04-15 17:00 | Step 2 complete | Added semantic-formatting and validation tests; default and `local` builds validated |
+| 2026-04-15 17:06 | Step 3 complete | Updated README, crate docs, and inline examples; adjacent proof-obligation docs re-verified |
 
 ---
 
@@ -96,5 +97,8 @@
 - 2026-04-15: Added `local`, `cuda`, `metal`, and `vulkan` Cargo features plus `hf-hub` / `llama-cpp-2` integration in `src/local.rs`; validated default and `local`-feature library builds with `cargo test --lib` and `cargo test --lib --features local --no-run`.
 - 2026-04-15: Added retrieval-formatting tests for Gemma and Qwen3, adversarial constructor tests for unsupported `LlamaCpp` usage and invalid reranker families, and instruction-formatting coverage for Qwen3 reranking.
 - 2026-04-15: Targeted validation succeeded with `cargo test --lib` and `cargo test --lib --features local --no-run`, covering the default library test set and feature-gated local compilation.
+- 2026-04-15: Updated `README.md`, crate-level docs in `src/lib.rs`, and inline module examples in `src/embedding.rs`, `src/reranker.rs`, and `src/config.rs`; `cargo test --doc` passed.
+- 2026-04-15: Re-reviewed the adjacent `proposal.md` and `design.md` proof-obligation docs after implementation; the current wording still matches the shipped semantic and local-backend behavior, so no contract-doc edits were required.
 | 2026-04-15 16:23 | Review R001 | plan Step 1: APPROVE |
 | 2026-04-15 16:42 | Review R002 | plan Step 2: APPROVE |
+| 2026-04-15 16:48 | Review R003 | plan Step 3: APPROVE |

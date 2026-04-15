@@ -1,4 +1,36 @@
 //! Configuration types for embedding and reranking services.
+//!
+//! ```rust
+//! use seasoning::AppConfig;
+//! use serde_json::json;
+//!
+//! let config_json = json!({
+//!     "embedding": {
+//!         "url": "https://api.deepinfra.com/v1/openai",
+//!         "model": "Qwen/Qwen3-Embedding-0.6B",
+//!         "dialect": "deepinfra",
+//!         "model_family": "qwen3",
+//!         "query_instruction": "Given a query, retrieve relevant passages",
+//!         "timeout_seconds": 10,
+//!         "embedding_dim": 1024,
+//!         "requests_per_minute": 1000,
+//!         "max_concurrent_requests": 50,
+//!         "tokens_per_minute": 1000000
+//!     },
+//!     "reranker": {
+//!         "url": "https://api.deepinfra.com/v1",
+//!         "model": "Qwen/Qwen3-Reranker-0.6B",
+//!         "dialect": "deepinfra",
+//!         "model_family": "qwen3",
+//!         "timeout_seconds": 10,
+//!         "requests_per_minute": 1000,
+//!         "max_concurrent_requests": 50,
+//!         "tokens_per_minute": 1000000
+//!     }
+//! });
+//!
+//! let _: AppConfig = serde_json::from_value(config_json).unwrap();
+//! ```
 
 use std::time::Duration;
 
