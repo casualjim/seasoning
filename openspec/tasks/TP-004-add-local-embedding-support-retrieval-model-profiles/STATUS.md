@@ -4,7 +4,7 @@
 **Status:** 🟡 In Progress
 **Last Updated:** 2026-04-15
 **Review Level:** 2
-**Review Counter:** 1
+**Review Counter:** 3
 **Iteration:** 1
 **Size:** M
 
@@ -37,7 +37,10 @@
 **Status:** 🟨 In Progress
 
 - [ ] Add or update the required tests for this capability, including adversarial coverage
+  - [ ] Add focused config-conversion coverage for the canonical `llama.cpp` dialect alias
 - [ ] Run targeted validation while iterating on the implementation
+  - [ ] Validate the default-feature test path used by repo gates
+  - [ ] Validate the feature-gated `local` path explicitly with a targeted `--features local` test run
 
 ---
 
@@ -92,5 +95,8 @@
 
 ## Notes
 
-*Reserved for execution notes*
+- Plan review R003: explicitly verify both default-feature and `local`-feature paths in Step 2 because `mise test` maps to `cargo test --all` and does not enable `--features local`.
+- Plan review R003 suggestion: add focused config-conversion coverage for `dialect = "llama.cpp"` in both embedding and reranker config conversion paths.
 | 2026-04-15 17:18 | Review R001 | plan Step 1: APPROVE |
+| 2026-04-15 17:23 | Review R002 | code Step 1: APPROVE |
+| 2026-04-15 17:25 | Review R003 | plan Step 2: REVISE |
