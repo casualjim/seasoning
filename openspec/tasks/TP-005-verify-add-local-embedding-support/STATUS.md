@@ -4,7 +4,7 @@
 **Status:** 🟡 In Progress
 **Last Updated:** 2026-04-15
 **Review Level:** 3
-**Review Counter:** 4
+**Review Counter:** 5
 **Iteration:** 1
 **Size:** M
 
@@ -29,11 +29,12 @@
 ---
 
 ### Step 2: Evaluate proof obligations and repo gates
-**Status:** ✅ Complete
+**Status:** 🟨 In Progress
 
 - [x] Confirm the required tests, including adversarial coverage, are present and aligned with the approved contract
 - [x] Confirm repo gates and verification outputs support the final verdict
 - [x] Reconcile R004 proof-gap feedback by recording missing positive local-construction acceptance evidence in the conformance findings
+- [ ] Reconcile R005 consistency feedback so Step 2 states assessment outcomes (including proof gaps) without claiming full proof closure
 
 ---
 
@@ -53,6 +54,7 @@
 | 2 | code | 1 | APPROVE | inline |
 | 3 | plan | 2 | APPROVE | inline |
 | 4 | code | 2 | REVISE | .reviews/R004-code-step2.md |
+| 5 | code | 2 | REVISE | .reviews/R005-code-step2.md |
 
 ---
 
@@ -86,6 +88,8 @@
 | 2026-04-15 18:00 | Review R004 | code Step 2: REVISE |
 | 2026-04-15 18:00 | Step 2 reopened | Added revision item for missing positive local-construction acceptance proof evidence |
 | 2026-04-15 18:02 | Step 2 revised | Recorded proof-obligation coverage gap for missing positive local-construction tests |
+| 2026-04-15 18:04 | Review R005 | code Step 2: REVISE |
+| 2026-04-15 18:04 | Step 2 reopened | Added consistency revision item so Step 2 outcome matches identified proof gaps |
 
 ---
 
@@ -105,3 +109,4 @@
 - 2026-04-15: Gate execution evidence captured with `mise format` and `mise test`; while both pass, `mise test` currently runs redundant full suites (`cargo nextest run`, `--features local`, and on Darwin `--features metal`) instead of selecting exactly one platform-appropriate local feature probe.
 - 2026-04-15: R004 revision resolved by recording a proof-obligation gap: current tests cover formatting/failure behavior but do not include positive local-construction acceptance tests for the supported local models.
 - Suggestion (R004): keep the repo-gate redundancy note because the observed three-suite behavior is accurate and relevant to conformance evidence.
+- Suggestion (R005): carry the same design/test citations into `conformance.md` for an auditable proof-gap trail.
