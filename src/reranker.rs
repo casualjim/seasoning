@@ -357,9 +357,7 @@ fn order_openai_scores(items: Vec<OpenAiRerankData>, inputs: usize) -> Result<Ve
     scores
         .into_iter()
         .enumerate()
-        .map(|(index, score)| {
-            score.ok_or(Error::InvalidRerankScoreIndex { index, inputs })
-        })
+        .map(|(index, score)| score.ok_or(Error::InvalidRerankScoreIndex { index, inputs }))
         .collect()
 }
 

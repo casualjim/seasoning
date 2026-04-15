@@ -1,7 +1,7 @@
 # TP-003: add-local-embedding-support / local-reranking — Status
 
 **Current Step:** Step 4: Repo gates
-**Status:** 🟡 In Progress
+**Status:** ✅ Complete
 **Last Updated:** 2026-04-15
 **Review Level:** 2
 **Review Counter:** 6
@@ -47,9 +47,9 @@
 ---
 
 ### Step 4: Repo gates
-**Status:** 🟨 In Progress
+**Status:** ✅ Complete
 
-- [ ] Run the required repo gates and leave the repository in a fully passing state
+- [x] Run the required repo gates and leave the repository in a fully passing state
 
 ---
 
@@ -88,6 +88,7 @@
 | 2026-04-15 17:11 | Step 3 started | Documentation and examples |
 | 2026-04-15 17:14 | Step 3 completed | README and crate examples updated; adjacent docs reviewed |
 | 2026-04-15 17:14 | Step 4 started | Repo gates |
+| 2026-04-15 17:18 | Step 4 completed | Fallback repo gates passed after mise wrapper env failure |
 
 ---
 
@@ -103,5 +104,6 @@
 - Step 1 implementation must keep query-only instruction application, Gemma `title: none | text: ...` formatting, and local reranker score/index correspondence visible as contract-critical outcomes ahead of Step 2 verification.
 - Step 2 must explicitly validate both default and `local` feature-gated test paths because `mise test` does not enable `--features local`.
 - Reviewed `openspec/changes/add-local-embedding-support/proposal.md` and `design.md` after documentation updates; both remained aligned with the implemented scope, so no adjacent contract-doc edits were required.
+- `mise format` could not run because `mise.toml` references a missing `env.DEEPINFRA_API_KEY` template value. I documented the wrapper issue and used raw `rustfmt` plus `cargo test --all` / `cargo test --all --features local` as the fallback verification path for this iteration.
 | 2026-04-15 17:09 | Review R005 | plan Step 2: APPROVE |
 | 2026-04-15 17:12 | Review R006 | code Step 2: APPROVE |

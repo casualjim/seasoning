@@ -331,7 +331,10 @@ mod tests {
             ModelFamily::Gemma.default_query_instruction()
         );
 
-        assert_eq!(ModelFamily::Gemma.format_embedding_input(&input, None), expected);
+        assert_eq!(
+            ModelFamily::Gemma.format_embedding_input(&input, None),
+            expected
+        );
         assert_eq!(
             ModelFamily::Gemma.format_embedding_input(&input, Some("   ")),
             expected
