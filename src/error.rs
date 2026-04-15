@@ -64,6 +64,12 @@ pub enum Error {
 
     #[error("embedder returned {embeddings} embeddings for {inputs} inputs")]
     EmbeddingCountMismatch { embeddings: usize, inputs: usize },
+
+    #[error("reranker returned {scores} scores for {inputs} inputs")]
+    RerankScoreCountMismatch { scores: usize, inputs: usize },
+
+    #[error("reranker returned an invalid score index {index} for {inputs} inputs")]
+    InvalidRerankScoreIndex { index: usize, inputs: usize },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

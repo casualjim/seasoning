@@ -1,10 +1,10 @@
 # TP-003: add-local-embedding-support / local-reranking — Status
 
-**Current Step:** Step 1: Implement the approved capability slice
+**Current Step:** Step 2: Tests and verification work
 **Status:** 🟡 In Progress
 **Last Updated:** 2026-04-15
 **Review Level:** 2
-**Review Counter:** 1
+**Review Counter:** 2
 **Iteration:** 1
 **Size:** M
 
@@ -21,16 +21,16 @@
 ---
 
 ### Step 1: Implement the approved capability slice
-**Status:** 🟨 In Progress
+**Status:** ✅ Complete
 
-- [ ] Implement the semantic embedding contract with explicit role/title/query-instruction handling across the approved public API surface
-- [ ] Enforce construction-time validation and exact edge-case semantics for dialect/family compatibility, local feature gating, and supported GGUF model scope
-- [ ] Preserve async public APIs while routing local llama.cpp embedding and reranking through internal blocking execution with stable score/input correspondence
+- [x] Implement the semantic embedding contract with explicit role/title/query-instruction handling across the approved public API surface
+- [x] Enforce construction-time validation and exact edge-case semantics for dialect/family compatibility, local feature gating, and supported GGUF model scope
+- [x] Preserve async public APIs while routing local llama.cpp embedding and reranking through internal blocking execution with stable score/input correspondence
 
 ---
 
 ### Step 2: Tests and verification work
-**Status:** ⬜ Not Started
+**Status:** 🟨 In Progress
 
 - [ ] Add or update the required tests for this capability, including adversarial coverage
 - [ ] Run targeted validation while iterating on the implementation
@@ -77,6 +77,8 @@
 | 2026-04-15 16:58 | Step 0 completed | Contract references and edit surface confirmed |
 | 2026-04-15 16:58 | Step 1 started | Implementation |
 | 2026-04-15 16:59 | Review R001 | plan Step 1: REVISE |
+| 2026-04-15 17:05 | Step 1 completed | Semantic API and reranker mapping validation updated |
+| 2026-04-15 17:05 | Step 2 started | Tests and verification |
 
 ---
 
@@ -90,3 +92,4 @@
 
 - Step 1 plan hydrated after R001 to explicitly cover semantic embedding formatting, construction-time validation/model allowlists, and async-preserving local execution.
 - Step 1 implementation must keep query-only instruction application, Gemma `title: none | text: ...` formatting, and local reranker score/index correspondence visible as contract-critical outcomes ahead of Step 2 verification.
+| 2026-04-15 16:59 | Review R002 | plan Step 1: APPROVE |

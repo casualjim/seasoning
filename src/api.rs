@@ -23,6 +23,7 @@ pub enum Dialect {
     /// DeepInfra remote APIs.
     DeepInfra,
     /// Local llama.cpp execution.
+    #[serde(rename = "llamacpp", alias = "llama-cpp", alias = "llama_cpp")]
     LlamaCpp,
 }
 

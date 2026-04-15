@@ -242,6 +242,8 @@ impl RemoteClient {
             debug!("Reranking used {} input tokens", input_tokens);
         }
 
+        ensure_score_count(response.scores.len(), documents.len())?;
+
         Ok(response
             .scores
             .into_iter()
@@ -273,14 +275,7 @@ impl RemoteClient {
             .post_json("/rerank", &payload, token_count)
             .await?;
 
-        let mut scores = vec![0.0f64; documents.len()];
-        for item in response.data {
-            if let Some(score) = scores.get_mut(item.index) {
-                *score = item.relevance_score.clamp(0.0, 1.0);
-            }
-        }
-
-        Ok(scores)
+        order_openai_scores(response.data, documents.len())
     }
 }
 
@@ -312,7 +307,9 @@ impl RerankingProvider for Client {
                     .iter()
                     .map(|document| self.format_local_qwen3_input(query, document))
                     .collect::<Vec<_>>();
-                client.score_texts(&formatted).await
+                let scores = client.score_texts(&formatted).await?;
+                ensure_score_count(scores.len(), documents.len())?;
+                Ok(scores)
             }
         }
     }
@@ -326,6 +323,43 @@ fn validate_reranker_family(model_family: ModelFamily) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn ensure_score_count(scores: usize, inputs: usize) -> Result<()> {
+    if scores != inputs {
+        return Err(Error::RerankScoreCountMismatch { scores, inputs });
+    }
+
+    Ok(())
+}
+
+fn order_openai_scores(items: Vec<OpenAiRerankData>, inputs: usize) -> Result<Vec<f64>> {
+    ensure_score_count(items.len(), inputs)?;
+
+    let mut scores = vec![None; inputs];
+    for item in items {
+        let slot = scores
+            .get_mut(item.index)
+            .ok_or(Error::InvalidRerankScoreIndex {
+                index: item.index,
+                inputs,
+            })?;
+        if slot.is_some() {
+            return Err(Error::InvalidRerankScoreIndex {
+                index: item.index,
+                inputs,
+            });
+        }
+        *slot = Some(item.relevance_score.clamp(0.0, 1.0));
+    }
+
+    scores
+        .into_iter()
+        .enumerate()
+        .map(|(index, score)| {
+            score.ok_or(Error::InvalidRerankScoreIndex { index, inputs })
+        })
+        .collect()
 }
 
 fn estimate_token_count(query: &RerankQuery, documents: &[RerankDocument]) -> u32 {
