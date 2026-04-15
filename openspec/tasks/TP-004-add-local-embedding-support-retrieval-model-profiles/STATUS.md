@@ -1,11 +1,11 @@
 # TP-004: add-local-embedding-support / retrieval-model-profiles — Status
 
-**Current Step:** Not Started
-**Status:** 🔵 Ready for Execution
+**Current Step:** Step 1: Implement the approved capability slice
+**Status:** 🟡 In Progress
 **Last Updated:** 2026-04-15
 **Review Level:** 2
 **Review Counter:** 0
-**Iteration:** 0
+**Iteration:** 1
 **Size:** M
 
 > **Hydration:** Checkboxes represent meaningful outcomes, not individual code changes. Expand them only when runtime discovery or review feedback requires it.
@@ -13,15 +13,15 @@
 ---
 
 ### Step 0: Preflight
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
-- [ ] Read the contract references and confirm the task remains within the approved change contract
-- [ ] Confirm the current code snapshot still matches the approved edit surface before modifying files
+- [x] Read the contract references and confirm the task remains within the approved change contract
+- [x] Confirm the current code snapshot still matches the approved edit surface before modifying files
 
 ---
 
 ### Step 1: Implement the approved capability slice
-**Status:** ⬜ Not Started
+**Status:** 🟨 In Progress
 
 - [ ] Apply the requested delta for this capability inside the approved module ownership and edit surface
 - [ ] Implement the approved behavioral semantics and exact failure or edge-case semantics
@@ -71,6 +71,10 @@
 | Timestamp | Action | Outcome |
 |-----------|--------|---------|
 | 2026-04-15 | Task staged | PROMPT.md and STATUS.md created |
+| 2026-04-15 17:15 | Task started | Runtime V2 lane-runner execution |
+| 2026-04-15 17:15 | Step 0 started | Preflight |
+| 2026-04-15 17:19 | Step 0 completed | Contract references and edit surface confirmed |
+| 2026-04-15 17:19 | Step 1 started | Capability implementation |
 
 ---
 
