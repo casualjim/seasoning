@@ -245,4 +245,51 @@ mod tests {
             "Client::new should return Err, not panic, for invalid API keys"
         );
     }
+
+    #[cfg(not(feature = "local"))]
+    #[test]
+    fn llama_cpp_requires_local_feature() {
+        let result = Client::new(EmbedderConfig {
+            api_key: None,
+            base_url: String::new(),
+            timeout: Duration::from_secs(1),
+            dialect: Dialect::LlamaCpp,
+            model_family: ModelFamily::Gemma,
+            model: "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf"
+                .to_string(),
+            query_instruction: None,
+            embedding_dim: 768,
+            requests_per_minute: 1,
+            max_concurrent_requests: 1,
+            tokens_per_minute: 1,
+        });
+
+        assert!(matches!(result, Err(crate::Error::LocalFeatureRequired { .. })));
+    }
+
+    #[cfg(feature = "local")]
+    #[test]
+    fn local_embedder_rejects_unsupported_model_for_family() {
+        let result = Client::new(EmbedderConfig {
+            api_key: None,
+            base_url: String::new(),
+            timeout: Duration::from_secs(1),
+            dialect: Dialect::LlamaCpp,
+            model_family: ModelFamily::Gemma,
+            model: "hf:example/unsupported.gguf".to_string(),
+            query_instruction: None,
+            embedding_dim: 768,
+            requests_per_minute: 1,
+            max_concurrent_requests: 1,
+            tokens_per_minute: 1,
+        });
+
+        assert!(matches!(
+            result,
+            Err(crate::Error::UnsupportedLocalModel {
+                kind: "embedding",
+                ..
+            })
+        ));
+    }
 }

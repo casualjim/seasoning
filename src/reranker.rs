@@ -430,6 +430,119 @@ mod tests {
         let _ = client.rerank(&query, &documents).await.unwrap();
     }
 
+    #[test]
+    fn reranker_requires_qwen3_family() {
+        let result = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: "https://api.deepinfra.com/v1".to_string(),
+            timeout: Duration::from_secs(10),
+            dialect: Dialect::DeepInfra,
+            model_family: ModelFamily::Gemma,
+            model: "test-model".to_string(),
+            instruction: None,
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        });
+
+        assert!(matches!(result, Err(Error::UnsupportedConfiguration { .. })));
+    }
+
+    #[cfg(not(feature = "local"))]
+    #[test]
+    fn llama_cpp_requires_local_feature() {
+        let result = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: String::new(),
+            timeout: Duration::from_secs(1),
+            dialect: Dialect::LlamaCpp,
+            model_family: ModelFamily::Qwen3,
+            model: "hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf"
+                .to_string(),
+            instruction: None,
+            requests_per_minute: 1,
+            max_concurrent_requests: 1,
+            tokens_per_minute: 1,
+        });
+
+        assert!(matches!(result, Err(Error::LocalFeatureRequired { .. })));
+    }
+
+    #[test]
+    fn local_qwen3_instruction_uses_default_and_override() {
+        let default_client = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: "https://api.deepinfra.com/v1".to_string(),
+            timeout: Duration::from_secs(10),
+            dialect: Dialect::DeepInfra,
+            model_family: ModelFamily::Qwen3,
+            model: "test-model".to_string(),
+            instruction: None,
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        })
+        .unwrap();
+        let custom_client = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: "https://api.deepinfra.com/v1".to_string(),
+            timeout: Duration::from_secs(10),
+            dialect: Dialect::DeepInfra,
+            model_family: ModelFamily::Qwen3,
+            model: "test-model".to_string(),
+            instruction: Some("rank docs".to_string()),
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        })
+        .unwrap();
+        let query = RerankQuery {
+            text: "memory safety".to_string(),
+            token_count: 2,
+        };
+        let document = RerankDocument {
+            text: "Rust prevents data races".to_string(),
+            token_count: 4,
+        };
+
+        assert_eq!(
+            default_client.format_local_qwen3_input(&query, &document),
+            format!(
+                "Instruct: {}\nQuery: memory safety\nDocument: Rust prevents data races",
+                ModelFamily::Qwen3.default_query_instruction()
+            )
+        );
+        assert_eq!(
+            custom_client.format_local_qwen3_input(&query, &document),
+            "Instruct: rank docs\nQuery: memory safety\nDocument: Rust prevents data races"
+        );
+    }
+
+    #[cfg(feature = "local")]
+    #[test]
+    fn local_reranker_rejects_unsupported_model() {
+        let result = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: String::new(),
+            timeout: Duration::from_secs(1),
+            dialect: Dialect::LlamaCpp,
+            model_family: ModelFamily::Qwen3,
+            model: "hf:example/unsupported.gguf".to_string(),
+            instruction: None,
+            requests_per_minute: 1,
+            max_concurrent_requests: 1,
+            tokens_per_minute: 1,
+        });
+
+        assert!(matches!(
+            result,
+            Err(Error::UnsupportedLocalModel {
+                kind: "reranking",
+                ..
+            })
+        ));
+    }
+
     #[tokio::test]
     async fn rerank_openai_success() {
         let mock_server = MockServer::start().await;

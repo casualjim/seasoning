@@ -1,10 +1,10 @@
 # TP-002: add-local-embedding-support / local-embeddings — Status
 
-**Current Step:** Step 2: Tests and verification work
+**Current Step:** Step 3: Documentation and examples
 **Status:** 🟡 In Progress
 **Last Updated:** 2026-04-15
 **Review Level:** 2
-**Review Counter:** 1
+**Review Counter:** 2
 **Iteration:** 1
 **Size:** M
 
@@ -31,15 +31,15 @@
 ---
 
 ### Step 2: Tests and verification work
-**Status:** 🟨 In Progress
+**Status:** ✅ Complete
 
-- [ ] Add or update the required tests for this capability, including adversarial coverage
-- [ ] Run targeted validation while iterating on the implementation
+- [x] Add or update the required tests for this capability, including adversarial coverage
+- [x] Run targeted validation while iterating on the implementation
 
 ---
 
 ### Step 3: Documentation and examples
-**Status:** ⬜ Not Started
+**Status:** 🟨 In Progress
 
 - [ ] Update the required docs and examples for this capability slice
 - [ ] Review adjacent docs or examples listed in the proof obligations and update them if affected
@@ -76,6 +76,7 @@
 | 2026-04-15 16:18 | Step 0 started | Preflight |
 | 2026-04-15 16:18 | Step 1 hydrated | Expanded implementation outcomes around semantic retrieval API, local llama.cpp support, and validation semantics |
 | 2026-04-15 16:54 | Step 1 complete | Retrieval semantics, local feature surface, and llama.cpp-backed embedding/reranking paths implemented |
+| 2026-04-15 17:00 | Step 2 complete | Added semantic-formatting and validation tests; default and `local` builds validated |
 
 ---
 
@@ -93,4 +94,7 @@
 - 2026-04-15: Implemented family-aware embedding formatting for Gemma and Qwen3 plus local/remote constructor branching, with explicit `local` feature validation and supported Hugging Face GGUF model checks.
 - 2026-04-15: Implemented reranker validation and execution branching for remote/OpenAI, remote/DeepInfra, and local llama.cpp flows, preserving query-empty failures and one-score-per-document ordering.
 - 2026-04-15: Added `local`, `cuda`, `metal`, and `vulkan` Cargo features plus `hf-hub` / `llama-cpp-2` integration in `src/local.rs`; validated default and `local`-feature library builds with `cargo test --lib` and `cargo test --lib --features local --no-run`.
+- 2026-04-15: Added retrieval-formatting tests for Gemma and Qwen3, adversarial constructor tests for unsupported `LlamaCpp` usage and invalid reranker families, and instruction-formatting coverage for Qwen3 reranking.
+- 2026-04-15: Targeted validation succeeded with `cargo test --lib` and `cargo test --lib --features local --no-run`, covering the default library test set and feature-gated local compilation.
 | 2026-04-15 16:23 | Review R001 | plan Step 1: APPROVE |
+| 2026-04-15 16:42 | Review R002 | plan Step 2: APPROVE |

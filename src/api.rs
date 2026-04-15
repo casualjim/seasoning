@@ -297,3 +297,94 @@ fn normalize_optional_text(value: Option<&str>) -> Option<String> {
         Some(normalized.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemma_query_formatting_uses_custom_task() {
+        let input = EmbeddingInput {
+            role: EmbeddingRole::Query,
+            text: "rust async runtime".to_string(),
+            title: None,
+            token_count: 3,
+        };
+
+        let formatted = ModelFamily::Gemma.format_embedding_input(&input, Some("custom task"));
+
+        assert_eq!(formatted, "task: custom task | query: rust async runtime");
+    }
+
+    #[test]
+    fn gemma_document_formatting_uses_title_or_none() {
+        let with_title = EmbeddingInput {
+            role: EmbeddingRole::Document,
+            text: "Rust enables fearless concurrency".to_string(),
+            title: Some("Rust".to_string()),
+            token_count: 4,
+        };
+        let without_title = EmbeddingInput {
+            role: EmbeddingRole::Document,
+            text: "Rust enables fearless concurrency".to_string(),
+            title: None,
+            token_count: 4,
+        };
+
+        assert_eq!(
+            ModelFamily::Gemma.format_embedding_input(&with_title, Some("ignored")),
+            "title: Rust | text: Rust enables fearless concurrency"
+        );
+        assert_eq!(
+            ModelFamily::Gemma.format_embedding_input(&without_title, Some("ignored")),
+            "title: none | text: Rust enables fearless concurrency"
+        );
+    }
+
+    #[test]
+    fn qwen3_query_formatting_uses_default_and_override() {
+        let input = EmbeddingInput {
+            role: EmbeddingRole::Query,
+            text: "rust ownership".to_string(),
+            title: None,
+            token_count: 2,
+        };
+
+        assert_eq!(
+            ModelFamily::Qwen3.format_embedding_input(&input, None),
+            format!(
+                "Instruct: {}\nQuery: rust ownership",
+                ModelFamily::Qwen3.default_query_instruction()
+            )
+        );
+        assert_eq!(
+            ModelFamily::Qwen3.format_embedding_input(&input, Some("custom instruction")),
+            "Instruct: custom instruction\nQuery: rust ownership"
+        );
+    }
+
+    #[test]
+    fn qwen3_document_formatting_ignores_query_instruction() {
+        let titled = EmbeddingInput {
+            role: EmbeddingRole::Document,
+            text: "Borrow checking catches aliasing bugs".to_string(),
+            title: Some("Borrow Checker".to_string()),
+            token_count: 5,
+        };
+        let untitled = EmbeddingInput {
+            role: EmbeddingRole::Document,
+            text: "Borrow checking catches aliasing bugs".to_string(),
+            title: None,
+            token_count: 5,
+        };
+
+        assert_eq!(
+            ModelFamily::Qwen3.format_embedding_input(&titled, Some("ignored")),
+            "Borrow Checker\nBorrow checking catches aliasing bugs"
+        );
+        assert_eq!(
+            ModelFamily::Qwen3.format_embedding_input(&untitled, Some("ignored")),
+            "Borrow checking catches aliasing bugs"
+        );
+    }
+}
