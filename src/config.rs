@@ -185,3 +185,59 @@ fn default_reranker_max_concurrent_requests() -> usize {
 fn default_reranker_tokens_per_minute() -> u32 {
     1_000_000
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn embedding_config_accepts_llama_dot_cpp_alias() {
+        let config = Embedding {
+            url: String::new(),
+            api_key: None,
+            model: "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf"
+                .to_string(),
+            tokenizer: String::new(),
+            dialect: "llama.cpp".to_string(),
+            model_family: "gemma".to_string(),
+            query_instruction: Some("retrieve docs".to_string()),
+            timeout_seconds: 30,
+            embedding_dim: 768,
+            context_length: default_context_length(),
+            max_batch_size: default_max_batch_size(),
+            workers: default_embedding_workers(),
+            requests_per_minute: 1,
+            max_concurrent_requests: 1,
+            tokens_per_minute: 1_000_000,
+        };
+
+        let converted = config.to_embedder_config().unwrap();
+
+        assert_eq!(converted.dialect, Dialect::LlamaCpp);
+        assert_eq!(converted.model_family, ModelFamily::Gemma);
+        assert_eq!(converted.query_instruction.as_deref(), Some("retrieve docs"));
+    }
+
+    #[test]
+    fn reranker_config_accepts_llama_dot_cpp_alias() {
+        let config = Reranker {
+            url: String::new(),
+            api_key: None,
+            model: "hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf"
+                .to_string(),
+            dialect: "llama.cpp".to_string(),
+            model_family: "qwen3".to_string(),
+            timeout_seconds: 30,
+            instruction: Some("rank docs".to_string()),
+            requests_per_minute: 1,
+            max_concurrent_requests: 1,
+            tokens_per_minute: 1_000_000,
+        };
+
+        let converted = config.to_reranker_config().unwrap();
+
+        assert_eq!(converted.dialect, Dialect::LlamaCpp);
+        assert_eq!(converted.model_family, ModelFamily::Qwen3);
+        assert_eq!(converted.instruction.as_deref(), Some("rank docs"));
+    }
+}
