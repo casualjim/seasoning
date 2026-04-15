@@ -440,6 +440,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn rerank_deepinfra_rejects_score_count_mismatch() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/inference/test-model"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "scores": [0.9]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: mock_server.uri(),
+            timeout: Duration::from_secs(10),
+            dialect: Dialect::DeepInfra,
+            model_family: ModelFamily::Qwen3,
+            model: "test-model".to_string(),
+            instruction: None,
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        })
+        .unwrap();
+
+        let query = RerankQuery {
+            text: "q".to_string(),
+            token_count: 1,
+        };
+        let documents = vec![
+            RerankDocument {
+                text: "a".to_string(),
+                token_count: 1,
+            },
+            RerankDocument {
+                text: "b".to_string(),
+                token_count: 1,
+            },
+        ];
+
+        let err = client.rerank(&query, &documents).await.unwrap_err();
+        assert!(matches!(
+            err,
+            Error::RerankScoreCountMismatch {
+                scores: 1,
+                inputs: 2
+            }
+        ));
+    }
+
+    #[tokio::test]
     async fn rerank_deepinfra_requires_query() {
         let mock_server = MockServer::start().await;
 
@@ -622,6 +673,65 @@ mod tests {
                 kind: "reranking",
                 ..
             })
+        ));
+    }
+
+    #[tokio::test]
+    async fn rerank_openai_rejects_invalid_index_mapping() {
+        let mock_server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/rerank"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "data": [
+                    { "index": 0, "relevanceScore": 0.8 },
+                    { "index": 3, "relevanceScore": 0.1 },
+                    { "index": 1, "relevanceScore": 0.6 }
+                ]
+            })))
+            .mount(&mock_server)
+            .await;
+
+        let client = Client::new(RerankerConfig {
+            api_key: None,
+            base_url: mock_server.uri(),
+            timeout: Duration::from_secs(10),
+            dialect: Dialect::OpenAI,
+            model_family: ModelFamily::Qwen3,
+            model: "test-model".to_string(),
+            instruction: None,
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        })
+        .unwrap();
+
+        let query = RerankQuery {
+            text: "q".to_string(),
+            token_count: 1,
+        };
+        let documents = vec![
+            RerankDocument {
+                text: "a".to_string(),
+                token_count: 2,
+            },
+            RerankDocument {
+                text: "b".to_string(),
+                token_count: 2,
+            },
+            RerankDocument {
+                text: "c".to_string(),
+                token_count: 2,
+            },
+        ];
+
+        let err = client.rerank(&query, &documents).await.unwrap_err();
+        assert!(matches!(
+            err,
+            Error::InvalidRerankScoreIndex {
+                index: 3,
+                inputs: 3
+            }
         ));
     }
 

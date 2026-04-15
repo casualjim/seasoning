@@ -318,6 +318,27 @@ mod tests {
     }
 
     #[test]
+    fn gemma_query_formatting_uses_default_task_for_missing_or_blank_instruction() {
+        let input = EmbeddingInput {
+            role: EmbeddingRole::Query,
+            text: "rust async runtime".to_string(),
+            title: None,
+            token_count: 3,
+        };
+
+        let expected = format!(
+            "task: {} | query: rust async runtime",
+            ModelFamily::Gemma.default_query_instruction()
+        );
+
+        assert_eq!(ModelFamily::Gemma.format_embedding_input(&input, None), expected);
+        assert_eq!(
+            ModelFamily::Gemma.format_embedding_input(&input, Some("   ")),
+            expected
+        );
+    }
+
+    #[test]
     fn gemma_document_formatting_uses_title_or_none() {
         let with_title = EmbeddingInput {
             role: EmbeddingRole::Document,
@@ -360,6 +381,21 @@ mod tests {
         );
         assert_eq!(
             ModelFamily::Qwen3.format_embedding_input(&input, Some("custom instruction")),
+            "Instruct: custom instruction\nQuery: rust ownership"
+        );
+    }
+
+    #[test]
+    fn qwen3_query_formatting_trims_custom_instruction() {
+        let input = EmbeddingInput {
+            role: EmbeddingRole::Query,
+            text: "rust ownership".to_string(),
+            title: None,
+            token_count: 2,
+        };
+
+        assert_eq!(
+            ModelFamily::Qwen3.format_embedding_input(&input, Some("  custom instruction  ")),
             "Instruct: custom instruction\nQuery: rust ownership"
         );
     }

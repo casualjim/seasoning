@@ -1,10 +1,10 @@
 # TP-003: add-local-embedding-support / local-reranking — Status
 
-**Current Step:** Step 2: Tests and verification work
+**Current Step:** Step 3: Documentation and examples
 **Status:** 🟡 In Progress
 **Last Updated:** 2026-04-15
 **Review Level:** 2
-**Review Counter:** 4
+**Review Counter:** 5
 **Iteration:** 1
 **Size:** M
 
@@ -30,16 +30,16 @@
 ---
 
 ### Step 2: Tests and verification work
-**Status:** 🟨 In Progress
+**Status:** ✅ Complete
 
-- [ ] Add formatting tests for Gemma and Qwen3 embedding semantics, including title handling and query-instruction defaults/overrides
-- [ ] Add validation tests for unsupported local feature/model usage and reranker score-count/index correspondence edge cases
-- [ ] Run targeted Rust test validation in both default and `local` feature modes for the relevant API, embedding, and reranker modules
+- [x] Add formatting tests for Gemma and Qwen3 embedding semantics, including title handling and query-instruction defaults/overrides
+- [x] Add validation tests for unsupported local feature/model usage and reranker score-count/index correspondence edge cases
+- [x] Run targeted Rust test validation in both default and `local` feature modes for the relevant API, embedding, and reranker modules
 
 ---
 
 ### Step 3: Documentation and examples
-**Status:** ⬜ Not Started
+**Status:** 🟨 In Progress
 
 - [ ] Update the required docs and examples for this capability slice
 - [ ] Review adjacent docs or examples listed in the proof obligations and update them if affected
@@ -84,6 +84,8 @@
 | 2026-04-15 17:05 | Step 1 completed | Semantic API and reranker mapping validation updated |
 | 2026-04-15 17:05 | Step 2 started | Tests and verification |
 | 2026-04-15 17:07 | Review R004 | plan Step 2: REVISE |
+| 2026-04-15 17:11 | Step 2 completed | Added formatting/validation tests and ran default + local test passes |
+| 2026-04-15 17:11 | Step 3 started | Documentation and examples |
 
 ---
 
@@ -98,3 +100,4 @@
 - Step 1 plan hydrated after R001 to explicitly cover semantic embedding formatting, construction-time validation/model allowlists, and async-preserving local execution.
 - Step 1 implementation must keep query-only instruction application, Gemma `title: none | text: ...` formatting, and local reranker score/index correspondence visible as contract-critical outcomes ahead of Step 2 verification.
 - Step 2 must explicitly validate both default and `local` feature-gated test paths because `mise test` does not enable `--features local`.
+| 2026-04-15 17:09 | Review R005 | plan Step 2: APPROVE |
