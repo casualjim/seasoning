@@ -8,3 +8,25 @@ node_modules
 .env.json
 .vscode
 .config/crumbs/*.db
+
+# Taskplane runtime artifacts (machine-specific, do not commit)
+.pi/batch-state.json
+.pi/batch-history.json
+.pi/lane-state-*
+.pi/merge-result-*
+.pi/merge-request-*
+.pi/worker-conversation-*
+.pi/runtime
+.pi/diagnostics
+.pi/supervisor
+.pi/taskplane.json
+.pi/orch-logs/
+.pi/orch-abort-signal
+.pi/settings.json
+.worktrees/
+.taskplane-tasks/
+
+# Pi project-local packages (if using pi install -l)
+.pi/npm/
+.pi/fff
+.pi/hippo-memory
