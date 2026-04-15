@@ -1,10 +1,10 @@
 # TP-005: Verify add-local-embedding-support — Status
 
-**Current Step:** Step 1: Evaluate delta and preservation conformance
+**Current Step:** Step 2: Evaluate proof obligations and repo gates
 **Status:** 🟡 In Progress
 **Last Updated:** 2026-04-15
 **Review Level:** 3
-**Review Counter:** 1
+**Review Counter:** 3
 **Iteration:** 1
 **Size:** M
 
@@ -29,10 +29,10 @@
 ---
 
 ### Step 2: Evaluate proof obligations and repo gates
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
-- [ ] Confirm the required tests, including adversarial coverage, are present and aligned with the approved contract
-- [ ] Confirm repo gates and verification outputs support the final verdict
+- [x] Confirm the required tests, including adversarial coverage, are present and aligned with the approved contract
+- [x] Confirm repo gates and verification outputs support the final verdict
 
 ---
 
@@ -49,6 +49,8 @@
 | # | Type | Step | Verdict | File |
 |---|------|------|---------|------|
 | 1 | plan | 1 | APPROVE | inline |
+| 2 | code | 1 | APPROVE | inline |
+| 3 | plan | 2 | APPROVE | inline |
 
 ---
 
@@ -72,6 +74,12 @@
 | 2026-04-15 17:48 | ⚠️ Steering | Conformance focus added: inspect Wave 1 `.mise` changes for scope compliance and expected platform-selection behavior |
 | 2026-04-15 17:49 | ⚠️ Steering | Operator guidance: report current redundant multi-suite repo-gate shape vs required single platform-selected feature set |
 | 2026-04-15 17:53 | Step 1 completed | Delta/preservation conformance assessed with evidence, including explicit `.mise` scope and redundancy concerns for conformance findings |
+| 2026-04-15 17:54 | Review R002 | code Step 1: APPROVE |
+| 2026-04-15 17:54 | Step 2 started | Evaluate proof obligations and repo gates |
+| 2026-04-15 17:56 | Review R003 | plan Step 2: APPROVE |
+| 2026-04-15 17:58 | Repo gate check | `mise format` passed |
+| 2026-04-15 17:58 | Repo gate check | `mise test` passed but executed three full nextest suites (`default`, `local`, and Darwin-only `metal`) |
+| 2026-04-15 17:59 | Step 2 completed | Proof obligations and repo gate evidence reviewed; redundancy finding prepared for conformance report |
 
 ---
 
@@ -87,3 +95,5 @@
 - 2026-04-15: Step 1 plan review R001 returned APPROVE before implementation work.
 - 2026-04-15: Delta/interface comparison confirms requested public semantic contract is present (`Dialect::{OpenAI,DeepInfra,LlamaCpp}`, `ModelFamily::{Gemma,Qwen3}`, `EmbeddingRole`, family-aware formatting, and local GGUF allowlists), but Wave 1 includes out-of-scope `.mise` repo-gate edits not listed in TP-004 edit surface.
 - 2026-04-15: Preservation/non-regression review found remote entry points remain (`embedding::Client`, `reranker::Client`), async APIs are preserved while local execution is internalized, and docs/examples were updated (`README.md`, `src/lib.rs`, module docs). Proof strength is reduced by repo-gate wrapper drift: `mise test` now runs multiple nextest suites (`default`, `local`, and Darwin `metal`) instead of selecting a single platform-appropriate local feature probe.
+- 2026-04-15: Required/adversarial proof coverage is present in source tests: Gemma/Qwen3 formatting (`src/api.rs`), no-`local` constructor failures (`src/embedding.rs`, `src/reranker.rs`), and score-count/index adversarial cases (`src/reranker.rs` mismatch + invalid index tests).
+- 2026-04-15: Gate execution evidence captured with `mise format` and `mise test`; while both pass, `mise test` currently runs redundant full suites (`cargo nextest run`, `--features local`, and on Darwin `--features metal`) instead of selecting exactly one platform-appropriate local feature probe.
