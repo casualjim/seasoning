@@ -4,7 +4,7 @@
 **Status:** 🟡 In Progress
 **Last Updated:** 2026-04-15
 **Review Level:** 2
-**Review Counter:** 2
+**Review Counter:** 3
 **Iteration:** 1
 **Size:** M
 
@@ -32,8 +32,9 @@
 ### Step 2: Tests and verification work
 **Status:** 🟨 In Progress
 
-- [ ] Add or update the required tests for this capability, including adversarial coverage
-- [ ] Run targeted validation while iterating on the implementation
+- [ ] Add formatting tests for Gemma and Qwen3 embedding semantics, including title handling and query-instruction defaults/overrides
+- [ ] Add validation tests for unsupported local feature/model usage and reranker score-count/index correspondence edge cases
+- [ ] Run targeted Rust test validation for the embedding and reranker modules
 
 ---
 
@@ -93,3 +94,4 @@
 - Step 1 plan hydrated after R001 to explicitly cover semantic embedding formatting, construction-time validation/model allowlists, and async-preserving local execution.
 - Step 1 implementation must keep query-only instruction application, Gemma `title: none | text: ...` formatting, and local reranker score/index correspondence visible as contract-critical outcomes ahead of Step 2 verification.
 | 2026-04-15 16:59 | Review R002 | plan Step 1: APPROVE |
+| 2026-04-15 17:04 | Review R003 | code Step 1: APPROVE |
