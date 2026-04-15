@@ -21,10 +21,10 @@
 ---
 
 ### Step 1: Evaluate delta and preservation conformance
-**Status:** 🟨 In Progress
+**Status:** ✅ Complete
 
-- [ ] Compare the assembled implementation against the approved requested delta and interface rules
-- [ ] Check preservation constraints, non-regression expectations, docs, examples, and proof strength
+- [x] Compare the assembled implementation against the approved requested delta and interface rules
+- [x] Check preservation constraints, non-regression expectations, docs, examples, and proof strength
 
 ---
 
@@ -56,6 +56,7 @@
 
 | Discovery | Disposition | Location |
 |-----------|-------------|----------|
+| Wave 1 modified repo-gate definitions in `mise.toml`, `.mise/tasks/test/_default`, and `.mise/tasks/test/rust`, which are outside TP-004’s approved file scope/edit targets. | Candidate blocking conformance finding (scope breach; remediation required) | `openspec/tasks/TP-004-add-local-embedding-support-retrieval-model-profiles/PROMPT.md`, `mise.toml`, `.mise/tasks/test/_default`, `.mise/tasks/test/rust` |
 
 ---
 
@@ -70,6 +71,7 @@
 | 2026-04-15 17:47 | Step 1 started | Evaluate delta and preservation conformance |
 | 2026-04-15 17:48 | ⚠️ Steering | Conformance focus added: inspect Wave 1 `.mise` changes for scope compliance and expected platform-selection behavior |
 | 2026-04-15 17:49 | ⚠️ Steering | Operator guidance: report current redundant multi-suite repo-gate shape vs required single platform-selected feature set |
+| 2026-04-15 17:53 | Step 1 completed | Delta/preservation conformance assessed with evidence, including explicit `.mise` scope and redundancy concerns for conformance findings |
 
 ---
 
@@ -83,3 +85,5 @@
 
 - 2026-04-15: Step 0 verification confirmed dependency packets TP-002, TP-003, and TP-004 each contain `.DONE` and completed STATUS records.
 - 2026-04-15: Step 1 plan review R001 returned APPROVE before implementation work.
+- 2026-04-15: Delta/interface comparison confirms requested public semantic contract is present (`Dialect::{OpenAI,DeepInfra,LlamaCpp}`, `ModelFamily::{Gemma,Qwen3}`, `EmbeddingRole`, family-aware formatting, and local GGUF allowlists), but Wave 1 includes out-of-scope `.mise` repo-gate edits not listed in TP-004 edit surface.
+- 2026-04-15: Preservation/non-regression review found remote entry points remain (`embedding::Client`, `reranker::Client`), async APIs are preserved while local execution is internalized, and docs/examples were updated (`README.md`, `src/lib.rs`, module docs). Proof strength is reduced by repo-gate wrapper drift: `mise test` now runs multiple nextest suites (`default`, `local`, and Darwin `metal`) instead of selecting a single platform-appropriate local feature probe.
