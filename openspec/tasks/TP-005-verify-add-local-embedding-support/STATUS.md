@@ -1,10 +1,10 @@
 # TP-005: Verify add-local-embedding-support — Status
 
-**Current Step:** Step 2: Evaluate proof obligations and repo gates
-**Status:** 🟡 In Progress
+**Current Step:** Step 3: Write the conformance report
+**Status:** ✅ Complete
 **Last Updated:** 2026-04-15
 **Review Level:** 3
-**Review Counter:** 5
+**Review Counter:** 6
 **Iteration:** 1
 **Size:** M
 
@@ -39,10 +39,10 @@
 ---
 
 ### Step 3: Write the conformance report
-**Status:** ⬜ Not Started
+**Status:** ✅ Complete
 
-- [ ] Write the conformance report with findings, evidence, and an explicit verdict
-- [ ] Use the approved disposition model for every blocking or non-blocking finding
+- [x] Write the conformance report with findings, evidence, and an explicit verdict
+- [x] Use the approved disposition model for every blocking or non-blocking finding
 
 ---
 
@@ -55,6 +55,7 @@
 | 3 | plan | 2 | APPROVE | inline |
 | 4 | code | 2 | REVISE | .reviews/R004-code-step2.md |
 | 5 | code | 2 | REVISE | .reviews/R005-code-step2.md |
+| 6 | code | 2 | APPROVE | inline |
 
 ---
 
@@ -91,6 +92,10 @@
 | 2026-04-15 18:04 | Review R005 | code Step 2: REVISE |
 | 2026-04-15 18:04 | Step 2 reopened | Added consistency revision item so Step 2 outcome matches identified proof gaps |
 | 2026-04-15 18:06 | Step 2 revised | Updated proof-obligation checkpoint wording to reflect assessment-with-gaps semantics |
+| 2026-04-15 18:07 | Review R006 | code Step 2: APPROVE |
+| 2026-04-15 18:07 | Step 3 started | Write conformance report |
+| 2026-04-15 18:10 | Step 3 completed | Conformance report written with explicit evidence-backed REMEDIATION_TASK verdict |
+| 2026-04-15 18:10 | Task completed | All TP-005 steps complete |
 
 ---
 
@@ -110,5 +115,7 @@
 - 2026-04-15: Gate execution evidence captured with `mise format` and `mise test`; while both pass, `mise test` currently runs redundant full suites (`cargo nextest run`, `--features local`, and on Darwin `--features metal`) instead of selecting exactly one platform-appropriate local feature probe.
 - 2026-04-15: R004 revision resolved by recording a proof-obligation gap: current tests cover formatting/failure behavior but do not include positive local-construction acceptance tests for the supported local models.
 - 2026-04-15: R005 revision resolved by rewording Step 2 proof-obligation outcome to an assessment-with-gaps checkpoint rather than a full-coverage confirmation.
+- 2026-04-15: Drafted `openspec/changes/add-local-embedding-support/conformance.md` with explicit blocking findings for out-of-scope `.mise` edits, redundant multi-suite gate behavior, and missing positive local-construction acceptance proofs.
+- 2026-04-15: Applied approved disposition labels (`REMEDIATION_TASK`) per blocking finding and set report verdict to `REMEDIATION_TASK`.
 - Suggestion (R004): keep the repo-gate redundancy note because the observed three-suite behavior is accurate and relevant to conformance evidence.
 - Suggestion (R005): carry the same design/test citations into `conformance.md` for an auditable proof-gap trail.
