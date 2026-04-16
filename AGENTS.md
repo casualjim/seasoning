@@ -40,6 +40,17 @@ Always default to the `mise` tasks below; only run direct toolchain commands if 
 
 **IMPORTANT** after changes ALWAYS run `mise format` and if you modified rust code also `mise test`
 
+## Release Process (PR-Driven Bumps)
+Releases are automated after CI passes on `main`. The bump level is controlled by tokens in the PR title/body (commit message fallback).
+
+- `bump:major`
+- `bump:minor`
+- `bump:patch`
+
+If no token is present, the release defaults to `bump:patch`. If multiple tokens are present, the highest wins (major > minor > patch).
+
+When using `gh` to create a PR, the agent must include the bump token in the PR body.
+
 ## Code Navigation with LSP
 
 **IMPORTANT: Follow the Tool Preference Order!** LSP tools are your PRIMARY navigation method for supported languages (Rust, TypeScript, Go).
