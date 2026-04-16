@@ -76,6 +76,11 @@ pub struct RerankerConfig {
     pub tokens_per_minute: u32,
 }
 
+/// Reranking client for remote APIs and local llama.cpp backends.
+///
+/// Remote backends send query/documents using the provider's native request
+/// shape. Local llama.cpp reranking formats each query/document pair with the
+/// configured [`ModelFamily`] before execution.
 #[derive(Clone)]
 pub struct Client {
     #[cfg(feature = "local")]
@@ -137,9 +142,14 @@ struct OpenAiRerankRequest<'a> {
 }
 
 impl Client {
+    /// Creates a reranking client.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the remote HTTP client cannot be built, if local
+    /// llama.cpp support is requested without the `local` feature, or if a
+    /// local GGUF model cannot be resolved or initialized.
     pub fn new(config: RerankerConfig) -> Result<Self> {
-        validate_reranker_family(config.model_family)?;
-
         match config.dialect {
             Dialect::OpenAI | Dialect::DeepInfra => {
                 #[cfg(feature = "local")]
@@ -304,16 +314,6 @@ impl RerankingProvider for Client {
             }
         }
     }
-}
-
-fn validate_reranker_family(model_family: ModelFamily) -> Result<()> {
-    if model_family != ModelFamily::Qwen3 {
-        return Err(Error::UnsupportedConfiguration {
-            message: "reranking currently supports ModelFamily::Qwen3 only".to_string(),
-        });
-    }
-
-    Ok(())
 }
 
 fn ensure_score_count(scores: usize, inputs: usize) -> Result<()> {
@@ -550,7 +550,7 @@ mod tests {
     }
 
     #[test]
-    fn reranker_requires_qwen3_family() {
+    fn reranker_accepts_gemma_family() {
         let result = Client::new(RerankerConfig {
             api_key: None,
             base_url: "https://api.deepinfra.com/v1".to_string(),
@@ -564,10 +564,7 @@ mod tests {
             tokens_per_minute: 1_000_000,
         });
 
-        assert!(matches!(
-            result,
-            Err(Error::UnsupportedConfiguration { .. })
-        ));
+        assert!(result.is_ok());
     }
 
     #[cfg(not(feature = "local"))]
@@ -612,31 +609,6 @@ mod tests {
             ModelFamily::Qwen3.format_reranker_input(&query, &document, Some("rank docs")),
             "Instruct: rank docs\nQuery: memory safety\nDocument: Rust prevents data races"
         );
-    }
-
-    #[cfg(feature = "local")]
-    #[test]
-    fn local_reranker_rejects_unsupported_model() {
-        let result = Client::new(RerankerConfig {
-            api_key: None,
-            base_url: String::new(),
-            timeout: Duration::from_secs(1),
-            dialect: Dialect::LlamaCpp,
-            model_family: ModelFamily::Qwen3,
-            model: "hf:example/unsupported.gguf".to_string(),
-            instruction: None,
-            requests_per_minute: 1,
-            max_concurrent_requests: 1,
-            tokens_per_minute: 1,
-        });
-
-        assert!(matches!(
-            result,
-            Err(Error::UnsupportedLocalModel {
-                kind: "reranking",
-                ..
-            })
-        ));
     }
 
     #[tokio::test]

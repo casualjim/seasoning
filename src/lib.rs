@@ -11,48 +11,52 @@
 //! retrieval-family formatting, and [`EmbeddingRole`] identifies whether a
 //! semantic embedding input is a query or document.
 //!
-//! Embedding execution consumes pre-tokenized [`PreparedEmbeddingInput`] values.
-//! Callers render semantic inputs first, then tokenize the rendered payload with
-//! the tokenizer for the target embedding model.
+//! Embedding execution keeps a semantic public API. The crate formats and
+//! prepares the final model payload internally after the API boundary.
 //!
 //! ## Embeddings
 //!
 //! ```rust,no_run
 //! use std::time::Duration;
 //!
+//! use std::sync::Arc;
+//!
 //! use secrecy::SecretString;
 //! use seasoning::EmbeddingProvider;
 //! use seasoning::embedding::{
 //!     Client as EmbedClient, Dialect, EmbedderConfig, EmbeddingInput, EmbeddingRole,
-//!     ModelFamily, PreparedEmbeddingInput,
+//!     ModelFamily, RemoteEmbedderConfig, Tokenizer,
 //! };
 //!
 //! # async fn example() -> seasoning::Result<()> {
-//! let embedder = EmbedClient::new(EmbedderConfig {
-//!     api_key: Some(SecretString::from("YOUR_API_KEY")),
-//!     base_url: "https://api.deepinfra.com/v1/openai".to_string(),
-//!     timeout: Duration::from_secs(10),
-//!     dialect: Dialect::DeepInfra,
-//!     model_family: ModelFamily::Qwen3,
-//!     model: "Qwen/Qwen3-Embedding-0.6B".to_string(),
-//!     query_instruction: None,
-//!     embedding_dim: 1024,
-//!     requests_per_minute: 1000,
-//!     max_concurrent_requests: 50,
-//!     tokens_per_minute: 1_000_000,
-//! })?;
+//! let embedder = EmbedClient::new(EmbedderConfig::remote(
+//!     ModelFamily::Qwen3,
+//!     Tokenizer::Tiktoken {
+//!         encoding: "cl100k_base".to_string(),
+//!         tokenizer: Arc::new(tiktoken_rs::cl100k_base()?),
+//!     },
+//!     "Qwen/Qwen3-Embedding-0.6B",
+//!     None,
+//!     RemoteEmbedderConfig {
+//!         api_key: Some(SecretString::from("YOUR_API_KEY")),
+//!         base_url: "https://api.deepinfra.com/v1/openai".to_string(),
+//!         timeout: Duration::from_secs(10),
+//!         dialect: Dialect::DeepInfra,
+//!         embedding_dim: 1024,
+//!         requests_per_minute: 1000,
+//!         max_concurrent_requests: 50,
+//!         tokens_per_minute: 1_000_000,
+//!     },
+//! )?)?;
 //!
-//! let semantic = EmbeddingInput {
+//! let inputs = vec![EmbeddingInput {
 //!     role: EmbeddingRole::Query,
 //!     text: "memory-safe systems programming".to_string(),
 //!     title: None,
-//! };
-//! let rendered = embedder.render_input(&semantic);
-//! let _ = rendered;
+//!     token_count: 4,
+//! }];
 //!
-//! // Tokenize `rendered` with the tokenizer for the target embedding model.
-//! let prepared = vec![PreparedEmbeddingInput::new(vec![1, 2, 3])?];
-//! let _ = embedder.embed(&prepared).await?;
+//! let _ = embedder.embed(&inputs).await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -109,8 +113,11 @@ pub mod service;
 
 pub use api::{
     AddDecision, BatchItem, BatchingStrategy, Dialect, EmbedOutput, EmbeddingInput,
-    EmbeddingProvider, EmbeddingRole, ModelFamily, PreparedEmbeddingInput, ProviderDialect,
-    RerankDocument, RerankQuery, RerankingProvider,
+    EmbeddingProvider, EmbeddingRole, ModelFamily, ProviderDialect, RerankDocument, RerankQuery,
+    RerankingProvider, Tokenizer,
 };
 pub use config::{AppConfig, Embedding, Reranker};
 pub use error::{Error, Result};
+#[cfg(feature = "local")]
+#[doc(inline)]
+pub use local::{GEMMA_EMBEDDING_MODEL, QWEN3_EMBEDDING_MODEL, QWEN3_RERANKER_MODEL};
