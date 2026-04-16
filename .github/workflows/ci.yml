@@ -1,15 +1,15 @@
-name: CI Build and Publish
+name: CI
 
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
 jobs:
-  build-and-publish:
+  test:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,13 +30,3 @@ jobs:
           DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
         run: |
           mise test -- --local-embeddings
-
-      - name: Publish to Cargo Registry
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        env:
-          CARGO_REGISTRY_TOKEN: "${{ secrets.CARGO_REGISTRY_TOKEN }}"
-          DEEPINFRA_API_KEY: ${{ secrets.DEEPINFRA_API_KEY }}
-        run: |
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-          cargo release patch --execute --no-confirm --features local
