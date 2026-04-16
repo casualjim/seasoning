@@ -2,10 +2,45 @@
 
 #MISE description="Build the application (Debug)"
 #MISE sources=["Cargo.toml", "src/**/*.rs"]
-#MISE outputs=["target/debug/context"]
+#USAGE flag "--local-embeddings" help="Include local embedding support and auto-select the best platform feature"
 
 echo "🚀 Starting debug build..."
 proj_dir=$(git rev-parse --show-toplevel)
 cd "$proj_dir" || exit 1
 
-cargo build
+set -euo pipefail
+
+select_local_feature() {
+  case "$(uname -s)" in
+    Darwin)
+      echo "metal"
+      return
+      ;;
+  esac
+
+  if command -v nvcc >/dev/null 2>&1 || command -v nvidia-smi >/dev/null 2>&1; then
+    echo "cuda"
+    return
+  fi
+
+  if command -v vulkaninfo >/dev/null 2>&1; then
+    echo "vulkan"
+    return
+  fi
+
+  if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists vulkan; then
+    echo "vulkan"
+    return
+  fi
+
+  echo "local"
+}
+
+if [ "${usage_local_embeddings:-false}" = "true" ]; then
+  feature=$(select_local_feature)
+  echo "🔧 Building debug with local embeddings feature: $feature"
+  cargo build --features "$feature"
+else
+  echo "🔧 Building debug without local embeddings"
+  cargo build
+fi

@@ -8,3 +8,18 @@ node_modules
 .env.json
 .vscode
 .config/crumbs/*.db
+
+# Taskplane runtime artifacts (machine-specific, do not commit)
+.pi/
+!.pi/prompts
+!.pi/agents
+!.pi/taskplane.json
+!.pi/taskplane-config.json
+!.pi/skills
+.worktrees/
+.taskplane-tasks/
+
+# Pi project-local packages (if using pi install -l)
+.pi/npm/
+.pi/fff
+.pi/hippo-memory

@@ -1,0 +1,70 @@
+{
+  "configVersion": 1,
+  "taskRunner": {
+    "project": {
+      "name": "seasoning",
+      "description": ""
+    },
+    "paths": {
+      "tasks": "openspec/tasks"
+    },
+    "testing": {
+      "commands": {
+        "test": "mise test",
+        "build": "mise build"
+      }
+    },
+    "taskAreas": {
+      "general": {
+        "path": "openspec/tasks",
+        "prefix": "TP",
+        "context": "openspec/tasks/CONTEXT.md"
+      }
+    },
+    "worker": {
+      "model": "zai/glm-5-turbo",
+      "thinking": "xhigh",
+      "spawnMode": "subprocess"
+    },
+    "reviewer": {
+      "model": "openai-codex/gpt-5.4",
+      "thinking": "high"
+    },
+    "protectedDocs": [
+      "docs/"
+    ]
+  },
+  "orchestrator": {
+    "orchestrator": {
+      "maxLanes": 1
+    },
+    "verification": {
+      "enabled": true,
+      "mode": "strict",
+      "flakyReruns": 1
+    },
+    "preWarm": {
+      "autoDetect": true,
+      "commands": {},
+      "always": [
+        "test -f .env.json || cp ${HOME}/github/casualjim/seasoning/.env.json .env.json",
+        "mise trust"
+      ]
+    },
+    "merge": {
+      "model": "",
+      "tools": "read,write,edit,bash,grep,find,ls",
+      "verify": [
+        "test -f .env.json || cp ${HOME}/github/casualjim/seasoning/.env.json .env.json",
+        "mise trust",
+        "mise run --force test"
+      ],
+      "order": "sequential",
+      "timeoutMinutes": 10
+    },
+    "supervisor": {
+      "model": "openai-codex/gpt-5.4",
+      "autonomy": "supervised"
+    }
+  }
+}

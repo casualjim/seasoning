@@ -1,26 +1,30 @@
 //! # Seasoning
 //!
-//! A Rust library providing embedding and reranking infrastructure with built-in
-//! rate limiting, retries, and support for multiple AI provider dialects.
+//! Retrieval-focused embedding and reranking infrastructure with explicit model
+//! semantics, rate limiting, retries, and optional local llama.cpp execution.
 //!
-//! ## Features
+//! Config-driven local setups accept the `llama.cpp`, `llamacpp`, `llama-cpp`,
+//! or `llama_cpp` dialect spellings when converting into [`Dialect::LlamaCpp`].
 //!
-//! - **Embedding Client**: Generate text embeddings with configurable rate limiting
-//!   and automatic retries
-//! - **Reranking Client**: Rerank documents based on query relevance
-//! - **Rate Limiting**: Token bucket algorithm for both request and token limits
-//! - **Retries**: Automatic retry logic with exponential backoff for transient failures
-//! - **Provider Support**: Flexible dialect system supporting OpenAI and DeepInfra APIs
+//! Seasoning separates backend/runtime selection from retrieval formatting:
+//! [`Dialect`] selects transport or local execution, [`ModelFamily`] selects
+//! retrieval-family formatting, and [`EmbeddingRole`] identifies whether a
+//! semantic embedding input is a query or document.
 //!
-//! ## Quick Start
+//! Embedding execution consumes pre-tokenized [`PreparedEmbeddingInput`] values.
+//! Callers render semantic inputs first, then tokenize the rendered payload with
+//! the tokenizer for the target embedding model.
 //!
-//! ### Embeddings
+//! ## Embeddings
 //!
 //! ```rust,no_run
 //! use std::time::Duration;
+//!
 //! use secrecy::SecretString;
+//! use seasoning::EmbeddingProvider;
 //! use seasoning::embedding::{
-//!     Client as EmbedClient, EmbedderConfig, EmbeddingInput, ProviderDialect,
+//!     Client as EmbedClient, Dialect, EmbedderConfig, EmbeddingInput, EmbeddingRole,
+//!     ModelFamily, PreparedEmbeddingInput,
 //! };
 //!
 //! # async fn example() -> seasoning::Result<()> {
@@ -28,32 +32,39 @@
 //!     api_key: Some(SecretString::from("YOUR_API_KEY")),
 //!     base_url: "https://api.deepinfra.com/v1/openai".to_string(),
 //!     timeout: Duration::from_secs(10),
-//!     dialect: ProviderDialect::DeepInfra,
+//!     dialect: Dialect::DeepInfra,
+//!     model_family: ModelFamily::Qwen3,
 //!     model: "Qwen/Qwen3-Embedding-0.6B".to_string(),
+//!     query_instruction: None,
 //!     embedding_dim: 1024,
 //!     requests_per_minute: 1000,
 //!     max_concurrent_requests: 50,
 //!     tokens_per_minute: 1_000_000,
 //! })?;
 //!
-//! let inputs = vec![
-//!     EmbeddingInput {
-//!         text: "hello world".to_string(),
-//!         token_count: 2,
-//!     },
-//! ];
+//! let semantic = EmbeddingInput {
+//!     role: EmbeddingRole::Query,
+//!     text: "memory-safe systems programming".to_string(),
+//!     title: None,
+//! };
+//! let rendered = embedder.render_input(&semantic);
+//! let _ = rendered;
 //!
-//! let result = embedder.embed(&inputs).await?;
+//! // Tokenize `rendered` with the tokenizer for the target embedding model.
+//! let prepared = vec![PreparedEmbeddingInput::new(vec![1, 2, 3])?];
+//! let _ = embedder.embed(&prepared).await?;
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! ### Reranking
+//! ## Reranking
 //!
 //! ```rust,no_run
 //! use std::time::Duration;
+//!
 //! use secrecy::SecretString;
-//! use seasoning::embedding::ProviderDialect;
+//! use seasoning::RerankingProvider;
+//! use seasoning::embedding::{Dialect, ModelFamily};
 //! use seasoning::reranker::{Client as RerankerClient, RerankerConfig};
 //!
 //! # async fn example() -> seasoning::Result<()> {
@@ -61,7 +72,8 @@
 //!     api_key: Some(SecretString::from("YOUR_API_KEY")),
 //!     base_url: "https://api.deepinfra.com/v1".to_string(),
 //!     timeout: Duration::from_secs(10),
-//!     dialect: ProviderDialect::DeepInfra,
+//!     dialect: Dialect::DeepInfra,
+//!     model_family: ModelFamily::Qwen3,
 //!     model: "Qwen/Qwen3-Reranker-0.6B".to_string(),
 //!     instruction: None,
 //!     requests_per_minute: 1000,
@@ -70,42 +82,35 @@
 //! })?;
 //!
 //! let query = seasoning::RerankQuery {
-//!     text: "search query".to_string(),
-//!     token_count: 2,
+//!     text: "memory-safe systems programming".to_string(),
+//!     token_count: 4,
 //! };
-//! let docs = vec![
-//!     seasoning::RerankDocument {
-//!         text: "first doc".to_string(),
-//!         token_count: 2,
-//!     },
-//!     seasoning::RerankDocument {
-//!         text: "second doc".to_string(),
-//!         token_count: 2,
-//!     },
-//! ];
-//! let scores = reranker.rerank(&query, &docs).await?;
+//! let documents = vec![seasoning::RerankDocument {
+//!     text: "Rust uses ownership and borrowing".to_string(),
+//!     token_count: 6,
+//! }];
+//!
+//! let scores = reranker.rerank(&query, &documents).await?;
+//! assert_eq!(scores.len(), documents.len());
 //! # Ok(())
 //! # }
 //! ```
-//!
-//! ## Modules
-//!
-//! - [`embedding`] - Text embedding generation with rate limiting
-//! - [`reranker`] - Document reranking based on query relevance
-//! - Configuration types re-exported from the private `config` module
 
 mod api;
 pub mod batching;
 mod config;
 pub mod embedding;
 mod error;
+#[cfg(feature = "local")]
+mod local;
 mod reqwestx;
 pub mod reranker;
 pub mod service;
 
 pub use api::{
-    AddDecision, BatchItem, BatchingStrategy, EmbedOutput, EmbeddingInput, EmbeddingProvider,
+    AddDecision, BatchItem, BatchingStrategy, Dialect, EmbedOutput, EmbeddingInput,
+    EmbeddingProvider, EmbeddingRole, ModelFamily, PreparedEmbeddingInput, ProviderDialect,
     RerankDocument, RerankQuery, RerankingProvider,
 };
-pub use config::*;
+pub use config::{AppConfig, Embedding, Reranker};
 pub use error::{Error, Result};

@@ -2,6 +2,12 @@
 
 #MISE description="Run the tests for this project"
 #MISE sources=["Cargo.toml", "src/**/*.rs"]
-#MISE depends=["build:debug"]
+#USAGE flag "--local-embeddings" help="Include local embedding support and auto-select the best platform feature"
 
-cargo nextest run --all-features
+set -euo pipefail
+
+if [ "${usage_local_embeddings:-false}" = "true" ]; then
+  mise run test:rust -- --local-embeddings
+else
+  mise run test:rust
+fi

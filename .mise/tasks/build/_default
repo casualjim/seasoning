@@ -2,11 +2,47 @@
 
 #MISE description="Build the application (Release)"
 #MISE sources=["Cargo.toml", "src/**/*.rs"]
-#MISE outputs=["target/debug/context"]
-#MISE depends=["test"]
+#USAGE flag "--local-embeddings" help="Include local embedding support and auto-select the best platform feature"
 
-echo "🚀 Starting Frontend release build..."
+echo "🚀 Starting release build..."
 proj_dir=$(git rev-parse --show-toplevel)
 cd "$proj_dir" || exit 1
 
-cargo build --release
+set -euo pipefail
+
+select_local_feature() {
+  case "$(uname -s)" in
+    Darwin)
+      echo "metal"
+      return
+      ;;
+  esac
+
+  if command -v nvcc >/dev/null 2>&1 || command -v nvidia-smi >/dev/null 2>&1; then
+    echo "cuda"
+    return
+  fi
+
+  if command -v vulkaninfo >/dev/null 2>&1; then
+    echo "vulkan"
+    return
+  fi
+
+  if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists vulkan; then
+    echo "vulkan"
+    return
+  fi
+
+  echo "local"
+}
+
+if [ "${usage_local_embeddings:-false}" = "true" ]; then
+  mise run test -- --local-embeddings
+  feature=$(select_local_feature)
+  echo "🔧 Building release with local embeddings feature: $feature"
+  cargo build --release --features "$feature"
+else
+  mise run test
+  echo "🔧 Building release without local embeddings"
+  cargo build --release
+fi
