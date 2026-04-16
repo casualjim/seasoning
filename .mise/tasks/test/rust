@@ -2,21 +2,45 @@
 
 #MISE description="Run the Rust tests for this project"
 #MISE sources=["Cargo.toml", "src/**/*.rs"]
+#USAGE flag "--local-embeddings" help="Include local embedding support and auto-select the best platform feature"
 
-echo "🚀 Starting Frontend Rust tests..."
+echo "🚀 Starting Seasoning Rust tests..."
 proj_dir=$(git rev-parse --show-toplevel)
 cd "$proj_dir" || exit 1
 
 set -euo pipefail
 
-cargo nextest run
-cargo nextest run --features local
+select_local_feature() {
+  case "$(uname -s)" in
+    Darwin)
+      echo "metal"
+      return
+      ;;
+  esac
 
-case "$(uname -s)" in
-  Darwin)
-    cargo nextest run --features metal
-    ;;
-  *)
-    echo "Skipping accelerator passthrough feature test runs in the default Rust gate; they require platform-specific native toolchains."
-    ;;
-esac
+  if command -v nvcc >/dev/null 2>&1 || command -v nvidia-smi >/dev/null 2>&1; then
+    echo "cuda"
+    return
+  fi
+
+  if command -v vulkaninfo >/dev/null 2>&1; then
+    echo "vulkan"
+    return
+  fi
+
+  if command -v pkg-config >/dev/null 2>&1 && pkg-config --exists vulkan; then
+    echo "vulkan"
+    return
+  fi
+
+  echo "local"
+}
+
+if [ "${usage_local_embeddings:-false}" = "true" ]; then
+  feature=$(select_local_feature)
+  echo "🧪 Running Rust tests with local embeddings feature: $feature"
+  cargo nextest run --features "$feature"
+else
+  echo "🧪 Running Rust tests without local embeddings"
+  cargo nextest run
+fi

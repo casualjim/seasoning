@@ -1,16 +1,76 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-use crate::Result;
+use crate::{Error, Result};
 
 const DEFAULT_GEMMA_QUERY_TASK: &str = "search documents";
 const DEFAULT_QWEN3_RETRIEVAL_INSTRUCTION: &str =
     "Given a web search query, retrieve relevant passages that answer the query";
 
+/// Prepared embedding payload ready for execution.
+///
+/// Token IDs must come from the tokenizer for the exact final rendered payload
+/// that will be embedded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "Vec<u32>", into = "Vec<u32>")]
+pub struct PreparedEmbeddingInput {
+    token_ids: Vec<u32>,
+}
+
+impl PreparedEmbeddingInput {
+    /// Create one prepared embedding payload from pre-tokenized model input.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::EmptyPreparedEmbeddingInput`] when `token_ids` is empty.
+    pub fn new(token_ids: Vec<u32>) -> Result<Self> {
+        if token_ids.is_empty() {
+            return Err(Error::EmptyPreparedEmbeddingInput);
+        }
+
+        Ok(Self { token_ids })
+    }
+
+    #[must_use]
+    pub fn token_ids(&self) -> &[u32] {
+        &self.token_ids
+    }
+
+    #[must_use]
+    pub fn token_count(&self) -> usize {
+        self.token_ids.len()
+    }
+
+    #[must_use]
+    pub fn into_token_ids(self) -> Vec<u32> {
+        self.token_ids
+    }
+}
+
+impl AsRef<[u32]> for PreparedEmbeddingInput {
+    fn as_ref(&self) -> &[u32] {
+        self.token_ids()
+    }
+}
+
+impl TryFrom<Vec<u32>> for PreparedEmbeddingInput {
+    type Error = Error;
+
+    fn try_from(token_ids: Vec<u32>) -> Result<Self> {
+        Self::new(token_ids)
+    }
+}
+
+impl From<PreparedEmbeddingInput> for Vec<u32> {
+    fn from(input: PreparedEmbeddingInput) -> Self {
+        input.into_token_ids()
+    }
+}
+
 pub struct BatchItem<M> {
     pub meta: M,
-    pub text: String,
-    pub token_count: usize,
+    /// Prepared embedding payload for one document/item.
+    pub input: PreparedEmbeddingInput,
 }
 
 /// Backend/runtime dialect for embedding and reranking execution.
@@ -23,7 +83,12 @@ pub enum Dialect {
     /// DeepInfra remote APIs.
     DeepInfra,
     /// Local llama.cpp execution.
-    #[serde(rename = "llamacpp", alias = "llama-cpp", alias = "llama_cpp")]
+    #[serde(
+        rename = "llamacpp",
+        alias = "llama-cpp",
+        alias = "llama_cpp",
+        alias = "llama.cpp"
+    )]
     LlamaCpp,
 }
 
@@ -103,6 +168,26 @@ impl ModelFamily {
             }
         }
     }
+
+    #[must_use]
+    pub fn format_reranker_input(
+        self,
+        query: &RerankQuery,
+        document: &RerankDocument,
+        instruction: Option<&str>,
+    ) -> String {
+        match self {
+            Self::Qwen3 => {
+                let instruction = normalize_optional_text(instruction)
+                    .unwrap_or_else(|| self.default_query_instruction().to_string());
+                format!(
+                    "Instruct: {instruction}\nQuery: {}\nDocument: {}",
+                    query.text, document.text
+                )
+            }
+            Self::Gemma => format!("Query: {}\nDocument: {}", query.text, document.text),
+        }
+    }
 }
 
 impl std::fmt::Display for ModelFamily {
@@ -129,10 +214,11 @@ impl std::fmt::Display for EmbeddingRole {
     }
 }
 
-/// Input for a single embedding request.
+/// Semantic embedding input.
 ///
-/// The caller supplies semantic retrieval metadata and the crate formats the
-/// final model text internally based on the configured [`ModelFamily`].
+/// Callers format this with [`ModelFamily::format_embedding_input`] or
+/// [`crate::embedding::Client::render_input`] before tokenizing the rendered
+/// payload for execution.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EmbeddingInput {
@@ -144,8 +230,6 @@ pub struct EmbeddingInput {
     /// Optional title metadata used by families that support document titles.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// Pre-calculated token count for rate limiting.
-    pub token_count: usize,
 }
 
 /// Output from an embedding request.
@@ -206,14 +290,14 @@ pub trait BatchingStrategy: Send {
 /// ```rust,no_run
 /// use async_trait::async_trait;
 /// use seasoning::Result;
-/// use seasoning::embedding::{EmbeddingInput, EmbedOutput};
+/// use seasoning::embedding::{EmbedOutput, PreparedEmbeddingInput};
 /// use seasoning::EmbeddingProvider;
 ///
 /// struct MockEmbedder;
 ///
 /// #[async_trait]
 /// impl EmbeddingProvider for MockEmbedder {
-///     async fn embed(&self, input: &[EmbeddingInput]) -> Result<EmbedOutput> {
+///     async fn embed(&self, input: &[PreparedEmbeddingInput]) -> Result<EmbedOutput> {
 ///         let embeddings = input.iter().map(|_| vec![0.0; 1024]).collect();
 ///         Ok(EmbedOutput { embeddings })
 ///     }
@@ -221,12 +305,12 @@ pub trait BatchingStrategy: Send {
 /// ```
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
-    /// Generate embeddings for the given inputs.
+    /// Generate embeddings for prepared model inputs.
     ///
     /// # Arguments
     ///
-    /// * `input` - Slice of semantic embedding inputs containing role, text, optional title,
-    ///   and token counts
+    /// * `input` - Slice of prepared embedding inputs containing token IDs for
+    ///   the final rendered model payloads
     ///
     /// # Returns
     ///
@@ -239,7 +323,7 @@ pub trait EmbeddingProvider: Send + Sync {
     /// - Rate limits are exceeded and retries are exhausted
     /// - The response cannot be parsed
     /// - Network errors occur
-    async fn embed(&self, input: &[EmbeddingInput]) -> Result<EmbedOutput>;
+    async fn embed(&self, input: &[PreparedEmbeddingInput]) -> Result<EmbedOutput>;
 }
 
 /// Trait for reranking providers.
@@ -304,12 +388,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn prepared_embedding_input_rejects_empty_tokens() {
+        let err = PreparedEmbeddingInput::new(Vec::new()).unwrap_err();
+        assert!(matches!(err, Error::EmptyPreparedEmbeddingInput));
+    }
+
+    #[test]
+    fn prepared_embedding_input_reports_token_count() {
+        let input = PreparedEmbeddingInput::new(vec![1, 2, 3]).unwrap();
+        assert_eq!(input.token_count(), 3);
+        assert_eq!(input.token_ids(), &[1, 2, 3]);
+    }
+
+    #[test]
     fn gemma_query_formatting_uses_custom_task() {
         let input = EmbeddingInput {
             role: EmbeddingRole::Query,
             text: "rust async runtime".to_string(),
             title: None,
-            token_count: 3,
         };
 
         let formatted = ModelFamily::Gemma.format_embedding_input(&input, Some("custom task"));
@@ -323,7 +419,6 @@ mod tests {
             role: EmbeddingRole::Query,
             text: "rust async runtime".to_string(),
             title: None,
-            token_count: 3,
         };
 
         let expected = format!(
@@ -347,13 +442,11 @@ mod tests {
             role: EmbeddingRole::Document,
             text: "Rust enables fearless concurrency".to_string(),
             title: Some("Rust".to_string()),
-            token_count: 4,
         };
         let without_title = EmbeddingInput {
             role: EmbeddingRole::Document,
             text: "Rust enables fearless concurrency".to_string(),
             title: None,
-            token_count: 4,
         };
 
         assert_eq!(
@@ -372,7 +465,6 @@ mod tests {
             role: EmbeddingRole::Query,
             text: "rust ownership".to_string(),
             title: None,
-            token_count: 2,
         };
 
         assert_eq!(
@@ -394,7 +486,6 @@ mod tests {
             role: EmbeddingRole::Query,
             text: "rust ownership".to_string(),
             title: None,
-            token_count: 2,
         };
 
         assert_eq!(
@@ -409,13 +500,11 @@ mod tests {
             role: EmbeddingRole::Document,
             text: "Borrow checking catches aliasing bugs".to_string(),
             title: Some("Borrow Checker".to_string()),
-            token_count: 5,
         };
         let untitled = EmbeddingInput {
             role: EmbeddingRole::Document,
             text: "Borrow checking catches aliasing bugs".to_string(),
             title: None,
-            token_count: 5,
         };
 
         assert_eq!(
@@ -425,6 +514,30 @@ mod tests {
         assert_eq!(
             ModelFamily::Qwen3.format_embedding_input(&untitled, Some("ignored")),
             "Borrow checking catches aliasing bugs"
+        );
+    }
+
+    #[test]
+    fn qwen3_reranker_formatting_uses_default_and_override() {
+        let query = RerankQuery {
+            text: "memory safety".to_string(),
+            token_count: 2,
+        };
+        let document = RerankDocument {
+            text: "Rust prevents data races".to_string(),
+            token_count: 4,
+        };
+
+        assert_eq!(
+            ModelFamily::Qwen3.format_reranker_input(&query, &document, None),
+            format!(
+                "Instruct: {}\nQuery: memory safety\nDocument: Rust prevents data races",
+                ModelFamily::Qwen3.default_query_instruction()
+            )
+        );
+        assert_eq!(
+            ModelFamily::Qwen3.format_reranker_input(&query, &document, Some("rank docs")),
+            "Instruct: rank docs\nQuery: memory safety\nDocument: Rust prevents data races"
         );
     }
 }

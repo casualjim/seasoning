@@ -13,14 +13,3 @@ rust = "latest"
 _.file = ".env.json"
 EMBEDDER_API_KEY = "{{ env.DEEPINFRA_API_KEY }}"
 
-[tasks.test]
-run = '''
-set -euo pipefail
-cargo nextest run
-cargo nextest run --features local
-if [ "$(uname -s)" = "Darwin" ]; then
-  cargo nextest run --features metal
-else
-  echo "Skipping accelerator passthrough feature test runs in the default repo gate; they require platform-specific native toolchains."
-fi
-'''

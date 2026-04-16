@@ -10,19 +10,12 @@ node_modules
 .config/crumbs/*.db
 
 # Taskplane runtime artifacts (machine-specific, do not commit)
-.pi/batch-state.json
-.pi/batch-history.json
-.pi/lane-state-*
-.pi/merge-result-*
-.pi/merge-request-*
-.pi/worker-conversation-*
-.pi/runtime
-.pi/diagnostics
-.pi/supervisor
-.pi/taskplane.json
-.pi/orch-logs/
-.pi/orch-abort-signal
-.pi/settings.json
+.pi/
+!.pi/prompts
+!.pi/agents
+!.pi/taskplane.json
+!.pi/taskplane-config.json
+!.pi/skills
 .worktrees/
 .taskplane-tasks/
 

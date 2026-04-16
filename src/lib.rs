@@ -8,8 +8,12 @@
 //!
 //! Seasoning separates backend/runtime selection from retrieval formatting:
 //! [`Dialect`] selects transport or local execution, [`ModelFamily`] selects
-//! retrieval-family formatting, and [`EmbeddingRole`] identifies whether an
-//! embedding input is a query or document.
+//! retrieval-family formatting, and [`EmbeddingRole`] identifies whether a
+//! semantic embedding input is a query or document.
+//!
+//! Embedding execution consumes pre-tokenized [`PreparedEmbeddingInput`] values.
+//! Callers render semantic inputs first, then tokenize the rendered payload with
+//! the tokenizer for the target embedding model.
 //!
 //! ## Embeddings
 //!
@@ -20,7 +24,7 @@
 //! use seasoning::EmbeddingProvider;
 //! use seasoning::embedding::{
 //!     Client as EmbedClient, Dialect, EmbedderConfig, EmbeddingInput, EmbeddingRole,
-//!     ModelFamily,
+//!     ModelFamily, PreparedEmbeddingInput,
 //! };
 //!
 //! # async fn example() -> seasoning::Result<()> {
@@ -38,17 +42,17 @@
 //!     tokens_per_minute: 1_000_000,
 //! })?;
 //!
-//! let inputs = vec![EmbeddingInput {
+//! let semantic = EmbeddingInput {
 //!     role: EmbeddingRole::Query,
 //!     text: "memory-safe systems programming".to_string(),
 //!     title: None,
-//!     token_count: 4,
-//! }];
+//! };
+//! let rendered = embedder.render_input(&semantic);
+//! let _ = rendered;
 //!
-//! // Qwen3 query instructions apply only to query inputs; document inputs
-//! // ignore them and use plain or title-prefixed text formatting.
-//!
-//! let _ = embedder.embed(&inputs).await?;
+//! // Tokenize `rendered` with the tokenizer for the target embedding model.
+//! let prepared = vec![PreparedEmbeddingInput::new(vec![1, 2, 3])?];
+//! let _ = embedder.embed(&prepared).await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -105,8 +109,8 @@ pub mod service;
 
 pub use api::{
     AddDecision, BatchItem, BatchingStrategy, Dialect, EmbedOutput, EmbeddingInput,
-    EmbeddingProvider, EmbeddingRole, ModelFamily, ProviderDialect, RerankDocument, RerankQuery,
-    RerankingProvider,
+    EmbeddingProvider, EmbeddingRole, ModelFamily, PreparedEmbeddingInput, ProviderDialect,
+    RerankDocument, RerankQuery, RerankingProvider,
 };
-pub use config::*;
+pub use config::{AppConfig, Embedding, Reranker};
 pub use error::{Error, Result};

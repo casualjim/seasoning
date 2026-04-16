@@ -16,9 +16,9 @@ Seasoning now separates **backend dialect** from **model-family behavior**:
 
 - `Dialect::{OpenAI, DeepInfra, LlamaCpp}` chooses the transport/runtime (config parsing accepts `llama.cpp`, `llamacpp`, `llama-cpp`, or `llama_cpp`).
 - `ModelFamily::{Gemma, Qwen3}` chooses retrieval formatting semantics.
-- `EmbeddingRole::{Query, Document}` tells the crate how to format each embedding input.
+- `EmbeddingRole::{Query, Document}` tells the crate how to format each semantic embedding input.
 
-That means callers pass semantic inputs and the crate formats final model text internally.
+Callers render semantic inputs first, then tokenize the rendered payload with the tokenizer for the target embedding model before execution.
 
 For example:
 - Gemma queries become `task: <task> | query: <text>`.
@@ -61,6 +61,7 @@ use secrecy::SecretString;
 use seasoning::EmbeddingProvider;
 use seasoning::embedding::{
     Client as EmbedClient, Dialect, EmbedderConfig, EmbeddingInput, EmbeddingRole, ModelFamily,
+    PreparedEmbeddingInput,
 };
 
 # async fn example() -> seasoning::Result<()> {
@@ -78,22 +79,17 @@ let embedder = EmbedClient::new(EmbedderConfig {
     tokens_per_minute: 1_000_000,
 })?;
 
-let inputs = vec![
-    EmbeddingInput {
-        role: EmbeddingRole::Query,
-        text: "memory safety without garbage collection".to_string(),
-        title: None,
-        token_count: 6,
-    },
-    EmbeddingInput {
-        role: EmbeddingRole::Document,
-        text: "Rust prevents data races at compile time".to_string(),
-        title: Some("Rust overview".to_string()),
-        token_count: 8,
-    },
-];
+let semantic = EmbeddingInput {
+    role: EmbeddingRole::Query,
+    text: "memory safety without garbage collection".to_string(),
+    title: None,
+};
+let rendered = embedder.render_input(&semantic);
+let _ = rendered;
 
-let result = embedder.embed(&inputs).await?;
+// Tokenize `rendered` with the tokenizer for the target embedding model.
+let prepared = vec![PreparedEmbeddingInput::new(vec![1, 2, 3])?];
+let result = embedder.embed(&prepared).await?;
 println!("got {} embeddings", result.embeddings.len());
 # Ok(())
 # }
@@ -182,7 +178,16 @@ let reranker = RerankerClient::new(RerankerConfig {
 # Ok::<(), seasoning::Error>(())
 ```
 
-Supported local GGUF artifacts are intentionally narrow for this change, and unsupported local models fail during client construction. Config-driven setups may spell the local dialect as `llama.cpp`, `llamacpp`, `llama-cpp`, or `llama_cpp`:
+Supported local GGUF artifacts are intentionally narrow for this change, and unsupported local models fail during client construction. Config-driven setups may spell the local dialect as `llama.cpp`, `llamacpp`, `llama-cpp`, or `llama_cpp`.
+
+When a local `hf:` GGUF artifact needs to be fetched from Hugging Face, download progress is enabled by default. You can control it with environment variables:
+
+- `SEASONING_HF_HUB_PROGRESS=0|1|false|true|off|on`
+- `HF_HUB_DISABLE_PROGRESS_BARS=1|0|true|false|off|on`
+
+If both are set, `SEASONING_HF_HUB_PROGRESS` wins.
+
+Supported model ids:
 
 - `hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf`
 - `hf:Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf`
@@ -193,7 +198,8 @@ Supported local GGUF artifacts are intentionally narrow for this change, and uns
 - Local `Dialect::LlamaCpp` construction fails explicitly when the crate is built without the `local` feature.
 - Gemma document formatting uses `title: none | text: ...` when no title is supplied.
 - Qwen3 query instructions apply only to query embeddings; document embeddings ignore them.
-- Existing remote entry points are preserved, but retrieval semantics now come from `ModelFamily` rather than transport labels.
+- Embedding execution consumes `PreparedEmbeddingInput`; semantic rendering happens before tokenization.
+- Retrieval semantics come from `ModelFamily` rather than transport labels.
 
 ## Modules
 

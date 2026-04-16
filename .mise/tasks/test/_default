@@ -2,18 +2,12 @@
 
 #MISE description="Run the tests for this project"
 #MISE sources=["Cargo.toml", "src/**/*.rs"]
-#MISE depends=["build:debug"]
+#USAGE flag "--local-embeddings" help="Include local embedding support and auto-select the best platform feature"
 
 set -euo pipefail
 
-cargo nextest run
-cargo nextest run --features local
-
-case "$(uname -s)" in
-  Darwin)
-    cargo nextest run --features metal
-    ;;
-  *)
-    echo "Skipping accelerator passthrough feature test runs in the default repo gate; they require platform-specific native toolchains."
-    ;;
-esac
+if [ "${usage_local_embeddings:-false}" = "true" ]; then
+  mise run test:rust -- --local-embeddings
+else
+  mise run test:rust
+fi

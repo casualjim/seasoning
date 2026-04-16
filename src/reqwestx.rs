@@ -108,6 +108,10 @@ impl ApiClient {
             .build()
             .map_err(Error::HttpClientBuild)?;
 
+        validate_positive(config.max_concurrent_requests, "max_concurrent_requests")?;
+        validate_positive(config.max_requests_per_minute, "max_requests_per_minute")?;
+        validate_positive(config.max_tokens_per_minute, "max_tokens_per_minute")?;
+
         let concurrent_semaphore = Arc::new(Semaphore::new(config.max_concurrent_requests));
 
         let request_rate = config.max_requests_per_minute as f64 / 60.0;
@@ -251,6 +255,16 @@ impl ApiClient {
             sleep(wait_with_buffer).await;
         }
     }
+}
+
+fn validate_positive(value: usize, field: &'static str) -> Result<()> {
+    if value == 0 {
+        return Err(Error::InvalidConfiguration {
+            message: format!("{field} must be greater than zero"),
+        });
+    }
+
+    Ok(())
 }
 
 fn rate_limit_jitter() -> Duration {
@@ -542,6 +556,33 @@ mod tests {
 
         let response: TestResponse = client.post_json("/test", &request, 10).await.unwrap();
         assert_eq!(response.result, "ua_ok");
+    }
+
+    #[test]
+    fn rejects_zero_limits() {
+        assert!(matches!(
+            ApiClient::new(ApiClientConfig {
+                max_concurrent_requests: 0,
+                ..Default::default()
+            }),
+            Err(Error::InvalidConfiguration { .. })
+        ));
+
+        assert!(matches!(
+            ApiClient::new(ApiClientConfig {
+                max_requests_per_minute: 0,
+                ..Default::default()
+            }),
+            Err(Error::InvalidConfiguration { .. })
+        ));
+
+        assert!(matches!(
+            ApiClient::new(ApiClientConfig {
+                max_tokens_per_minute: 0,
+                ..Default::default()
+            }),
+            Err(Error::InvalidConfiguration { .. })
+        ));
     }
 
     #[tokio::test]

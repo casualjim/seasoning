@@ -29,9 +29,6 @@ pub enum Error {
     #[error("embedder batch channel closed")]
     BatchChannelClosed,
 
-    #[error("embedder result channel closed with {pending} pending batches")]
-    EmbedderResultChannelClosed { pending: usize },
-
     #[error("rerank query cannot be empty")]
     EmptyRerankQuery,
 
@@ -47,6 +44,9 @@ pub enum Error {
     #[error("unsupported configuration: {message}")]
     UnsupportedConfiguration { message: String },
 
+    #[error("invalid configuration: {message}")]
+    InvalidConfiguration { message: String },
+
     #[error("unsupported local model '{model}' for {kind}")]
     UnsupportedLocalModel { kind: &'static str, model: String },
 
@@ -56,6 +56,14 @@ pub enum Error {
     #[error("local runtime channel closed unexpectedly")]
     LocalRuntimeChannelClosed,
 
+    #[error("prepared embedding input token ids cannot be empty")]
+    EmptyPreparedEmbeddingInput,
+
+    #[error(
+        "embedding input at index {index} contains token id {token_id} that does not fit in i32"
+    )]
+    InvalidEmbeddingTokenId { index: usize, token_id: u32 },
+
     #[error("api request failed with status {status}")]
     ApiStatus {
         status: StatusCode,
@@ -64,6 +72,9 @@ pub enum Error {
 
     #[error("embedder returned {embeddings} embeddings for {inputs} inputs")]
     EmbeddingCountMismatch { embeddings: usize, inputs: usize },
+
+    #[error("embedder returned an invalid embedding index {index} for {inputs} inputs")]
+    InvalidEmbeddingIndex { index: usize, inputs: usize },
 
     #[error("reranker returned {scores} scores for {inputs} inputs")]
     RerankScoreCountMismatch { scores: usize, inputs: usize },

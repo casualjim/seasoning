@@ -78,7 +78,7 @@ pub struct RerankerConfig {
 
 #[derive(Clone)]
 pub struct Client {
-    #[cfg_attr(not(any(test, feature = "local")), allow(dead_code))]
+    #[cfg(feature = "local")]
     model_family: ModelFamily,
     instruction: Option<String>,
     backend: Backend,
@@ -142,10 +142,12 @@ impl Client {
 
         match config.dialect {
             Dialect::OpenAI | Dialect::DeepInfra => {
+                #[cfg(feature = "local")]
                 let model_family = config.model_family;
                 let instruction = config.instruction.clone();
                 let remote = RemoteClient::new(config)?;
                 Ok(Self {
+                    #[cfg(feature = "local")]
                     model_family,
                     instruction,
                     backend: Backend::Remote(remote),
@@ -155,6 +157,7 @@ impl Client {
                 #[cfg(feature = "local")]
                 {
                     Ok(Self {
+                        #[cfg(feature = "local")]
                         model_family: config.model_family,
                         instruction: config.instruction,
                         backend: Backend::Local(LocalRerankerClient::new(
@@ -172,25 +175,6 @@ impl Client {
                 }
             }
         }
-    }
-
-    #[cfg_attr(not(any(test, feature = "local")), allow(dead_code))]
-    fn local_instruction(&self) -> String {
-        self.instruction
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned)
-            .unwrap_or_else(|| self.model_family.default_query_instruction().to_string())
-    }
-
-    #[cfg_attr(not(any(test, feature = "local")), allow(dead_code))]
-    fn format_local_qwen3_input(&self, query: &RerankQuery, document: &RerankDocument) -> String {
-        let instruction = self.local_instruction();
-        format!(
-            "Instruct: {instruction}\nQuery: {}\nDocument: {}",
-            query.text, document.text
-        )
     }
 }
 
@@ -306,7 +290,13 @@ impl RerankingProvider for Client {
 
                 let formatted = documents
                     .iter()
-                    .map(|document| self.format_local_qwen3_input(query, document))
+                    .map(|document| {
+                        self.model_family.format_reranker_input(
+                            query,
+                            document,
+                            self.instruction.as_deref(),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let scores = client.score_texts(&formatted).await?;
                 ensure_score_count(scores.len(), documents.len())?;
@@ -602,32 +592,6 @@ mod tests {
 
     #[test]
     fn local_qwen3_instruction_uses_default_and_override() {
-        let default_client = Client::new(RerankerConfig {
-            api_key: None,
-            base_url: "https://api.deepinfra.com/v1".to_string(),
-            timeout: Duration::from_secs(10),
-            dialect: Dialect::DeepInfra,
-            model_family: ModelFamily::Qwen3,
-            model: "test-model".to_string(),
-            instruction: None,
-            requests_per_minute: 1000,
-            max_concurrent_requests: 10,
-            tokens_per_minute: 1_000_000,
-        })
-        .unwrap();
-        let custom_client = Client::new(RerankerConfig {
-            api_key: None,
-            base_url: "https://api.deepinfra.com/v1".to_string(),
-            timeout: Duration::from_secs(10),
-            dialect: Dialect::DeepInfra,
-            model_family: ModelFamily::Qwen3,
-            model: "test-model".to_string(),
-            instruction: Some("rank docs".to_string()),
-            requests_per_minute: 1000,
-            max_concurrent_requests: 10,
-            tokens_per_minute: 1_000_000,
-        })
-        .unwrap();
         let query = RerankQuery {
             text: "memory safety".to_string(),
             token_count: 2,
@@ -638,14 +602,14 @@ mod tests {
         };
 
         assert_eq!(
-            default_client.format_local_qwen3_input(&query, &document),
+            ModelFamily::Qwen3.format_reranker_input(&query, &document, None),
             format!(
                 "Instruct: {}\nQuery: memory safety\nDocument: Rust prevents data races",
                 ModelFamily::Qwen3.default_query_instruction()
             )
         );
         assert_eq!(
-            custom_client.format_local_qwen3_input(&query, &document),
+            ModelFamily::Qwen3.format_reranker_input(&query, &document, Some("rank docs")),
             "Instruct: rank docs\nQuery: memory safety\nDocument: Rust prevents data races"
         );
     }
