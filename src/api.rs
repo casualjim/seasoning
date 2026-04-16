@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
@@ -7,23 +9,13 @@ const DEFAULT_GEMMA_QUERY_TASK: &str = "search documents";
 const DEFAULT_QWEN3_RETRIEVAL_INSTRUCTION: &str =
     "Given a web search query, retrieve relevant passages that answer the query";
 
-/// Prepared embedding payload ready for execution.
-///
-/// Token IDs must come from the tokenizer for the exact final rendered payload
-/// that will be embedded.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(try_from = "Vec<u32>", into = "Vec<u32>")]
-pub struct PreparedEmbeddingInput {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PreparedEmbeddingInput {
     token_ids: Vec<u32>,
 }
 
 impl PreparedEmbeddingInput {
-    /// Create one prepared embedding payload from pre-tokenized model input.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::EmptyPreparedEmbeddingInput`] when `token_ids` is empty.
-    pub fn new(token_ids: Vec<u32>) -> Result<Self> {
+    pub(crate) fn new(token_ids: Vec<u32>) -> Result<Self> {
         if token_ids.is_empty() {
             return Err(Error::EmptyPreparedEmbeddingInput);
         }
@@ -32,45 +24,29 @@ impl PreparedEmbeddingInput {
     }
 
     #[must_use]
-    pub fn token_ids(&self) -> &[u32] {
+    pub(crate) fn token_ids(&self) -> &[u32] {
         &self.token_ids
     }
 
     #[must_use]
-    pub fn token_count(&self) -> usize {
+    pub(crate) fn token_count(&self) -> usize {
         self.token_ids.len()
     }
-
-    #[must_use]
-    pub fn into_token_ids(self) -> Vec<u32> {
-        self.token_ids
-    }
 }
 
-impl AsRef<[u32]> for PreparedEmbeddingInput {
-    fn as_ref(&self) -> &[u32] {
-        self.token_ids()
-    }
-}
-
-impl TryFrom<Vec<u32>> for PreparedEmbeddingInput {
-    type Error = Error;
-
-    fn try_from(token_ids: Vec<u32>) -> Result<Self> {
-        Self::new(token_ids)
-    }
-}
-
-impl From<PreparedEmbeddingInput> for Vec<u32> {
-    fn from(input: PreparedEmbeddingInput) -> Self {
-        input.into_token_ids()
-    }
-}
-
+/// One semantic embedding item for [`crate::service::EmbedderService`].
+#[derive(Debug, Default)]
 pub struct BatchItem<M> {
+    /// Caller metadata returned alongside the embedding vectors.
     pub meta: M,
-    /// Prepared embedding payload for one document/item.
-    pub input: PreparedEmbeddingInput,
+    /// Whether this item is a retrieval query or document.
+    pub role: EmbeddingRole,
+    /// Semantic text to embed.
+    pub text: String,
+    /// Optional title metadata for families that use it.
+    pub title: Option<String>,
+    /// Token count used for batching decisions.
+    pub token_count: usize,
 }
 
 /// Backend/runtime dialect for embedding and reranking execution.
@@ -111,6 +87,57 @@ impl std::fmt::Display for Dialect {
 
 /// Backwards-compatible alias for the previous public name.
 pub type ProviderDialect = Dialect;
+
+/// Preloaded tokenizer instances used by the embedding model layer.
+///
+/// This mirrors the tokenizer kinds from `niblits`, but only permits already
+/// loaded tokenizer values instead of string/model-id configuration.
+#[derive(Clone)]
+pub enum Tokenizer {
+    /// Simple character-based tokenization.
+    Characters,
+    /// Preloaded OpenAI tiktoken tokenizer.
+    Tiktoken {
+        encoding: String,
+        tokenizer: Arc<tiktoken_rs::CoreBPE>,
+    },
+    /// Preloaded Hugging Face tokenizer.
+    HuggingFace {
+        model_id: String,
+        tokenizer: Arc<tokenizers::Tokenizer>,
+    },
+}
+
+impl Tokenizer {
+    pub(crate) fn prepare(&self, text: &str) -> Result<PreparedEmbeddingInput> {
+        let token_ids = match self {
+            Self::Characters => {
+                return Err(Error::InvalidConfiguration {
+                    message: "embedding preparation requires a tokenizer that yields model token ids; the characters tokenizer only counts characters".to_string(),
+                });
+            }
+            Self::Tiktoken { tokenizer, .. } => tokenizer.encode_ordinary(text),
+            Self::HuggingFace { tokenizer, .. } => tokenizer
+                .encode(text, false)
+                .map(|encoding| encoding.get_ids().to_vec())
+                .map_err(|error| Error::InvalidConfiguration {
+                    message: format!("failed to encode with HF tokenizer: {error}"),
+                })?,
+        };
+
+        PreparedEmbeddingInput::new(token_ids)
+    }
+}
+
+impl std::fmt::Debug for Tokenizer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Characters => f.write_str("Characters"),
+            Self::Tiktoken { encoding, .. } => write!(f, "Tiktoken({encoding})"),
+            Self::HuggingFace { model_id, .. } => write!(f, "HuggingFace({model_id})"),
+        }
+    }
+}
 
 /// Retrieval-family semantics used to format embedding and reranking inputs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
@@ -214,11 +241,11 @@ impl std::fmt::Display for EmbeddingRole {
     }
 }
 
-/// Semantic embedding input.
+/// Input for a single embedding request.
 ///
-/// Callers format this with [`ModelFamily::format_embedding_input`] or
-/// [`crate::embedding::Client::render_input`] before tokenizing the rendered
-/// payload for execution.
+/// The caller supplies semantic retrieval metadata and the crate formats and
+/// prepares the final model payload internally based on the configured
+/// [`ModelFamily`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EmbeddingInput {
@@ -230,6 +257,8 @@ pub struct EmbeddingInput {
     /// Optional title metadata used by families that support document titles.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// Caller-maintained token count for batching or external accounting.
+    pub token_count: usize,
 }
 
 /// Output from an embedding request.
@@ -267,16 +296,24 @@ pub struct RerankDocument {
     pub token_count: usize,
 }
 
+/// Batching strategy response for a newly added item.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AddDecision {
+    /// Keep accumulating items in the current batch.
     Continue,
+    /// Flush the current batch before starting a new one with the added item.
     Flush,
 }
 
+/// Strategy interface for token-aware batch assembly.
 pub trait BatchingStrategy: Send {
+    /// Records one additional item with the given token count.
     fn add(&mut self, token_count: usize) -> AddDecision;
+    /// Resets the strategy after a flush.
     fn flush(&mut self);
+    /// Returns the hard item limit for one batch.
     fn max_items_per_batch(&self) -> usize;
+    /// Returns the hard token limit for one batch.
     fn max_tokens_per_batch(&self) -> usize;
 }
 
@@ -290,14 +327,14 @@ pub trait BatchingStrategy: Send {
 /// ```rust,no_run
 /// use async_trait::async_trait;
 /// use seasoning::Result;
-/// use seasoning::embedding::{EmbedOutput, PreparedEmbeddingInput};
+/// use seasoning::embedding::{EmbedOutput, EmbeddingInput};
 /// use seasoning::EmbeddingProvider;
 ///
 /// struct MockEmbedder;
 ///
 /// #[async_trait]
 /// impl EmbeddingProvider for MockEmbedder {
-///     async fn embed(&self, input: &[PreparedEmbeddingInput]) -> Result<EmbedOutput> {
+///     async fn embed(&self, input: &[EmbeddingInput]) -> Result<EmbedOutput> {
 ///         let embeddings = input.iter().map(|_| vec![0.0; 1024]).collect();
 ///         Ok(EmbedOutput { embeddings })
 ///     }
@@ -305,12 +342,12 @@ pub trait BatchingStrategy: Send {
 /// ```
 #[async_trait]
 pub trait EmbeddingProvider: Send + Sync {
-    /// Generate embeddings for prepared model inputs.
+    /// Generate embeddings for the given inputs.
     ///
     /// # Arguments
     ///
-    /// * `input` - Slice of prepared embedding inputs containing token IDs for
-    ///   the final rendered model payloads
+    /// * `input` - Slice of semantic embedding inputs containing role, text, optional title,
+    ///   and token counts
     ///
     /// # Returns
     ///
@@ -323,7 +360,7 @@ pub trait EmbeddingProvider: Send + Sync {
     /// - Rate limits are exceeded and retries are exhausted
     /// - The response cannot be parsed
     /// - Network errors occur
-    async fn embed(&self, input: &[PreparedEmbeddingInput]) -> Result<EmbedOutput>;
+    async fn embed(&self, input: &[EmbeddingInput]) -> Result<EmbedOutput>;
 }
 
 /// Trait for reranking providers.
@@ -406,6 +443,7 @@ mod tests {
             role: EmbeddingRole::Query,
             text: "rust async runtime".to_string(),
             title: None,
+            token_count: 3,
         };
 
         let formatted = ModelFamily::Gemma.format_embedding_input(&input, Some("custom task"));
@@ -419,6 +457,7 @@ mod tests {
             role: EmbeddingRole::Query,
             text: "rust async runtime".to_string(),
             title: None,
+            token_count: 3,
         };
 
         let expected = format!(
@@ -442,11 +481,13 @@ mod tests {
             role: EmbeddingRole::Document,
             text: "Rust enables fearless concurrency".to_string(),
             title: Some("Rust".to_string()),
+            token_count: 4,
         };
         let without_title = EmbeddingInput {
             role: EmbeddingRole::Document,
             text: "Rust enables fearless concurrency".to_string(),
             title: None,
+            token_count: 4,
         };
 
         assert_eq!(
@@ -465,6 +506,7 @@ mod tests {
             role: EmbeddingRole::Query,
             text: "rust ownership".to_string(),
             title: None,
+            token_count: 2,
         };
 
         assert_eq!(
@@ -486,6 +528,7 @@ mod tests {
             role: EmbeddingRole::Query,
             text: "rust ownership".to_string(),
             title: None,
+            token_count: 2,
         };
 
         assert_eq!(
@@ -500,11 +543,13 @@ mod tests {
             role: EmbeddingRole::Document,
             text: "Borrow checking catches aliasing bugs".to_string(),
             title: Some("Borrow Checker".to_string()),
+            token_count: 4,
         };
         let untitled = EmbeddingInput {
             role: EmbeddingRole::Document,
             text: "Borrow checking catches aliasing bugs".to_string(),
             title: None,
+            token_count: 4,
         };
 
         assert_eq!(

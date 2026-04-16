@@ -1,0 +1,12 @@
+{
+  "disable_ai": true,
+  "lsp": {
+    "rust-analyzer": {
+      "initialization_options": {
+        "cargo": {
+          "features": ["local"]
+        }
+      }
+    }
+  }
+}

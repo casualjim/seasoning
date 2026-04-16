@@ -1,5 +1,6 @@
 use reqwest::StatusCode;
 
+/// Crate-wide error type.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("invalid api key header value: {0}")]
@@ -29,6 +30,17 @@ pub enum Error {
     #[error("embedder batch channel closed")]
     BatchChannelClosed,
 
+    #[error(
+        "batch item token_count {token_count} exceeds max_tokens_per_batch {max_tokens_per_batch}"
+    )]
+    BatchItemTooLarge {
+        token_count: usize,
+        max_tokens_per_batch: usize,
+    },
+
+    #[error("embedder service requires an active tokio runtime")]
+    TokioRuntimeRequired,
+
     #[error("rerank query cannot be empty")]
     EmptyRerankQuery,
 
@@ -46,9 +58,6 @@ pub enum Error {
 
     #[error("invalid configuration: {message}")]
     InvalidConfiguration { message: String },
-
-    #[error("unsupported local model '{model}' for {kind}")]
-    UnsupportedLocalModel { kind: &'static str, model: String },
 
     #[error("local runtime failed: {message}")]
     LocalRuntime { message: String },
@@ -83,4 +92,5 @@ pub enum Error {
     InvalidRerankScoreIndex { index: usize, inputs: usize },
 }
 
+/// Crate-wide result alias.
 pub type Result<T> = std::result::Result<T, Error>;
