@@ -480,26 +480,32 @@ mod tests {
         RerankingProvider, Tokenizer,
     };
 
-    fn tokenizer_for_model_spec(model: &str) -> Tokenizer {
+    fn tokenizer_for_model_spec(model: &str) -> Result<Tokenizer> {
         let model_id = match model {
             GEMMA_EMBEDDING_MODEL => "google/embeddinggemma-300m",
             QWEN3_EMBEDDING_MODEL => "Qwen/Qwen3-Embedding-0.6B",
             other => panic!("unsupported tokenizer mapping for model: {other}"),
         };
-        let tokenizer = tokenizers::Tokenizer::from_pretrained(model_id, None).unwrap();
-        Tokenizer::HuggingFace {
+        let tokenizer = tokenizers::Tokenizer::from_pretrained(model_id, None).map_err(|error| {
+            Error::LocalRuntime {
+                message: format!(
+                    "failed to load test tokenizer '{model_id}' for local embedding model '{model}': {error}"
+                ),
+            }
+        })?;
+        Ok(Tokenizer::HuggingFace {
             model_id: model_id.to_string(),
             tokenizer: std::sync::Arc::new(tokenizer),
-        }
+        })
     }
 
-    fn test_embedding_config(model_family: ModelFamily, model: &str) -> EmbedderConfig {
-        EmbedderConfig::local(
+    fn test_embedding_config(model_family: ModelFamily, model: &str) -> Result<EmbedderConfig> {
+        Ok(EmbedderConfig::local(
             model_family,
-            tokenizer_for_model_spec(model),
+            tokenizer_for_model_spec(model)?,
             model.to_string(),
             None,
-        )
+        ))
     }
 
     fn test_reranker_config(model: &str) -> RerankerConfig {
@@ -590,13 +596,22 @@ mod tests {
 
     #[tokio::test]
     async fn local_embedding_clients_embed_supported_models_end_to_end() {
+        let mut exercised_models = 0usize;
+
         for (model_family, model_spec) in [
             (ModelFamily::Gemma, GEMMA_EMBEDDING_MODEL),
             (ModelFamily::Qwen3, QWEN3_EMBEDDING_MODEL),
         ] {
-            let tokenizer = tokenizer_for_model_spec(model_spec);
+            let Ok(tokenizer) = tokenizer_for_model_spec(model_spec) else {
+                eprintln!(
+                    "skipping local embedding E2E for {model_spec}: tokenizer fetch unavailable"
+                );
+                continue;
+            };
             let client =
-                EmbeddingClient::new(test_embedding_config(model_family, model_spec)).unwrap();
+                EmbeddingClient::new(test_embedding_config(model_family, model_spec).unwrap())
+                    .unwrap();
+            exercised_models += 1;
             let query_a = EmbeddingInput {
                 role: EmbeddingRole::Query,
                 text: "memory safety in rust".to_string(),
@@ -678,6 +693,11 @@ mod tests {
                 "model {model_spec} should distinguish unrelated queries"
             );
         }
+
+        assert!(
+            exercised_models > 0,
+            "expected at least one local embedding model E2E path to run"
+        );
     }
 
     #[tokio::test]
