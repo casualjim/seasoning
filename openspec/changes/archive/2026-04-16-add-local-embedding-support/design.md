@@ -4,13 +4,15 @@ Seasoning currently mixes transport concerns with model semantics. On the embedd
 
 This change also introduces a second execution backend. Remote calls are async HTTP requests with retries and rate limiting; local llama.cpp calls are synchronous, stateful, and model/context driven. The design needs to support both without pushing formatting or runtime details back onto the caller.
 
-Supported local model scope for this change is intentionally narrow and aligned with QMD usage:
+Example local model references for this change are aligned with QMD usage:
 
 - Embeddings:
   - `hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf`
   - `hf:Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf`
 - Reranking:
   - `hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf`
+
+These model ids are documented examples, not an exclusive allowlist or support policy boundary for all valid `hf:<repo>/<file>.gguf` artifacts.
 
 ## Goals / Non-Goals
 
@@ -65,7 +67,7 @@ The query-side instruction/task is applied only when the role is `Query`.
 ### 4. Keep reranker instruction support and align it with family-aware behavior
 The existing reranker `instruction` field remains. For Qwen3 reranking, it maps onto the model’s instruction-aware pair formatting. Embedding configuration gains a parallel instruction/task concept for query embeddings.
 
-### 5. Add a feature-gated local runtime with narrow, opinionated support
+### 5. Add a feature-gated local runtime with opinionated Hugging Face GGUF support
 Local support is added behind `local`, with accelerator passthrough features:
 
 - `local`
@@ -73,7 +75,7 @@ Local support is added behind `local`, with accelerator passthrough features:
 - `metal` → implies `local`
 - `vulkan` → implies `local`
 
-`llama-cpp-2` and `hf-hub` are optional dependencies enabled through these features. The first version supports only the explicitly documented QMD-aligned model set.
+`llama-cpp-2` and `hf-hub` are optional dependencies enabled through these features. The first version accepts Hugging Face hosted GGUF artifacts in `hf:<repo>/<file>.gguf` form, while documenting QMD-aligned examples for the initial supported retrieval families.
 
 ### 6. Use an internal blocking local runtime, not a shared external orchestration layer
 Local llama.cpp work will run inside the crate, using lazy model initialization and internal synchronization around mutable context access. Calls from async APIs will delegate to blocking work rather than pretending llama.cpp inference is natively async.
@@ -106,13 +108,16 @@ Primary implementation work is owned by:
 - `src/config.rs`
 - `src/embedding.rs`
 - `src/reranker.rs`
+- `src/error.rs`
+- `src/batching.rs`
+- `src/service.rs`
 
 New local runtime support may add new modules under one of these owned paths:
 
 - `src/local.rs`
 - `src/local/*.rs`
 
-No unrelated modules are in scope for semantic rewrites outside these files.
+Supporting changes in batching, service orchestration, and error surfaces are in scope where they are required to preserve semantic embedding behavior and local execution correctness.
 
 ## Behavioral Semantics
 
@@ -148,6 +153,7 @@ No unrelated modules are in scope for semantic rewrites outside these files.
 - Unit tests for Qwen3 query/document formatting, including instruction defaults and overrides.
 - Construction-time validation tests for unsupported `LlamaCpp` usage without the `local` feature.
 - Reranking tests that verify score count and stable index correspondence.
+- End-to-end local embedding and local reranking tests against real llama.cpp execution paths for documented example GGUF artifacts.
 
 ### Documentation and Examples
 - `README.md`
@@ -160,7 +166,7 @@ No unrelated modules are in scope for semantic rewrites outside these files.
 
 ## Risks / Trade-offs
 
-- **[Semantic result drift]** Remote and local backends may produce different scores or vectors for the same family due to model/runtime differences → **Mitigation:** scope supported families explicitly, document the supported models, and test formatting behavior directly.
+- **[Semantic result drift]** Remote and local backends may produce different scores or vectors for the same family due to model/runtime differences → **Mitigation:** scope supported families explicitly, document example models, and test formatting behavior directly.
 - **[Native dependency complexity]** `llama-cpp-2` introduces feature- and platform-specific build complexity → **Mitigation:** keep local support feature-gated and pass through `cuda`, `metal`, and `vulkan` explicitly.
 - **[Async/runtime impedance mismatch]** llama.cpp inference is blocking and stateful → **Mitigation:** isolate it behind internal blocking execution and synchronization rather than leaking that complexity into public APIs.
 - **[Configuration expansion]** Adding role, family, instruction, and title makes the API more explicit and justifies a minor release bump → **Mitigation:** keep naming tight and make invalid combinations fail early with clear errors.

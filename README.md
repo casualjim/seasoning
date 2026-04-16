@@ -7,18 +7,18 @@ Retrieval-focused embedding and reranking infrastructure for Rust.
 - Semantic embedding inputs with explicit query/document roles.
 - Model-family-aware formatting for Gemma and Qwen3 retrieval models.
 - Remote OpenAI-compatible and DeepInfra backends.
-- Feature-gated local llama.cpp execution for the scoped Hugging Face GGUF models.
+- Optional local llama.cpp execution for Hugging Face GGUF models.
 - Rate limiting, retry handling, and async public APIs.
 
 ## Semantic model
 
-Seasoning now separates **backend dialect** from **model-family behavior**:
+Seasoning separates **backend dialect** from **model-family behavior**:
 
-- `Dialect::{OpenAI, DeepInfra, LlamaCpp}` chooses the transport/runtime (config parsing accepts `llama.cpp`, `llamacpp`, `llama-cpp`, or `llama_cpp`).
+- `Dialect::{OpenAI, DeepInfra, LlamaCpp}` chooses the backend/runtime.
 - `ModelFamily::{Gemma, Qwen3}` chooses retrieval formatting semantics.
-- `EmbeddingRole::{Query, Document}` tells the crate how to format each semantic embedding input.
+- `EmbeddingRole::{Query, Document}` tells the crate how to format each embedding input.
 
-Callers render semantic inputs first, then tokenize the rendered payload with the tokenizer for the target embedding model before execution.
+You pass semantic embedding inputs. Seasoning renders the model-specific text and tokenizes it internally before execution.
 
 For example:
 - Gemma queries become `task: <task> | query: <text>`.
@@ -55,41 +55,44 @@ seasoning = { path = ".", features = ["cuda"] }
 ### Embeddings
 
 ```rust,no_run
+use std::sync::Arc;
 use std::time::Duration;
 
 use secrecy::SecretString;
 use seasoning::EmbeddingProvider;
 use seasoning::embedding::{
     Client as EmbedClient, Dialect, EmbedderConfig, EmbeddingInput, EmbeddingRole, ModelFamily,
-    PreparedEmbeddingInput,
+    RemoteEmbedderConfig, Tokenizer,
 };
 
 # async fn example() -> seasoning::Result<()> {
-let embedder = EmbedClient::new(EmbedderConfig {
-    api_key: Some(SecretString::from("YOUR_API_KEY")),
-    base_url: "https://api.deepinfra.com/v1/openai".to_string(),
-    timeout: Duration::from_secs(10),
-    dialect: Dialect::DeepInfra,
-    model_family: ModelFamily::Qwen3,
-    model: "Qwen/Qwen3-Embedding-0.6B".to_string(),
-    query_instruction: Some("Given a user query, retrieve matching passages".to_string()),
-    embedding_dim: 1024,
-    requests_per_minute: 1000,
-    max_concurrent_requests: 50,
-    tokens_per_minute: 1_000_000,
-})?;
+let embedder = EmbedClient::new(EmbedderConfig::remote(
+    ModelFamily::Qwen3,
+    Tokenizer::Tiktoken {
+        encoding: "cl100k_base".to_string(),
+        tokenizer: Arc::new(tiktoken_rs::cl100k_base()?),
+    },
+    "Qwen/Qwen3-Embedding-0.6B",
+    Some("Given a user query, retrieve matching passages".to_string()),
+    RemoteEmbedderConfig {
+        api_key: Some(SecretString::from("YOUR_API_KEY")),
+        base_url: "https://api.deepinfra.com/v1/openai".to_string(),
+        timeout: Duration::from_secs(10),
+        dialect: Dialect::DeepInfra,
+        embedding_dim: 1024,
+        requests_per_minute: 1000,
+        max_concurrent_requests: 50,
+        tokens_per_minute: 1_000_000,
+    },
+)?)?;
 
-let semantic = EmbeddingInput {
+let inputs = vec![EmbeddingInput {
     role: EmbeddingRole::Query,
     text: "memory safety without garbage collection".to_string(),
     title: None,
-};
-let rendered = embedder.render_input(&semantic);
-let _ = rendered;
-
-// Tokenize `rendered` with the tokenizer for the target embedding model.
-let prepared = vec![PreparedEmbeddingInput::new(vec![1, 2, 3])?];
-let result = embedder.embed(&prepared).await?;
+    token_count: 6,
+}];
+let result = embedder.embed(&inputs).await?;
 println!("got {} embeddings", result.embeddings.len());
 # Ok(())
 # }
@@ -143,24 +146,21 @@ println!("{scores:?}");
 ### Local llama.cpp embeddings and reranking
 
 ```rust,ignore
+use std::sync::Arc;
 use std::time::Duration;
 
-use seasoning::embedding::{Client as EmbedClient, Dialect, EmbedderConfig, ModelFamily};
+use seasoning::embedding::{Client as EmbedClient, Dialect, EmbedderConfig, ModelFamily, Tokenizer};
 use seasoning::reranker::{Client as RerankerClient, RerankerConfig};
 
-let embedder = EmbedClient::new(EmbedderConfig {
-    api_key: None,
-    base_url: String::new(),
-    timeout: Duration::from_secs(30),
-    dialect: Dialect::LlamaCpp,
-    model_family: ModelFamily::Gemma,
-    model: "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf".to_string(),
-    query_instruction: None,
-    embedding_dim: 768,
-    requests_per_minute: 1,
-    max_concurrent_requests: 1,
-    tokens_per_minute: 1_000_000,
-})?;
+let embedder = EmbedClient::new(EmbedderConfig::local(
+    ModelFamily::Gemma,
+    Tokenizer::HuggingFace {
+        model_id: "google/embeddinggemma-300m".to_string(),
+        tokenizer: Arc::new(tokenizers::Tokenizer::from_pretrained("google/embeddinggemma-300m", None)?),
+    },
+    "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf",
+    None,
+))?;
 
 let reranker = RerankerClient::new(RerankerConfig {
     api_key: None,
@@ -178,7 +178,8 @@ let reranker = RerankerClient::new(RerankerConfig {
 # Ok::<(), seasoning::Error>(())
 ```
 
-Supported local GGUF artifacts are intentionally narrow for this change, and unsupported local models fail during client construction. Config-driven setups may spell the local dialect as `llama.cpp`, `llamacpp`, `llama-cpp`, or `llama_cpp`.
+Example local GGUF model ids:
+
 
 When a local `hf:` GGUF artifact needs to be fetched from Hugging Face, download progress is enabled by default. You can control it with environment variables:
 
@@ -187,23 +188,20 @@ When a local `hf:` GGUF artifact needs to be fetched from Hugging Face, download
 
 If both are set, `SEASONING_HF_HUB_PROGRESS` wins.
 
-Supported model ids:
-
 - `hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf`
 - `hf:Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf`
 - `hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf`
 
 ## Notes
 
-- Local `Dialect::LlamaCpp` construction fails explicitly when the crate is built without the `local` feature.
-- Gemma document formatting uses `title: none | text: ...` when no title is supplied.
-- Qwen3 query instructions apply only to query embeddings; document embeddings ignore them.
-- Embedding execution consumes `PreparedEmbeddingInput`; semantic rendering happens before tokenization.
-- Retrieval semantics come from `ModelFamily` rather than transport labels.
+- Build with the `local` feature to use `Dialect::LlamaCpp`.
+- Gemma documents use `title: none | text: ...` when no title is supplied.
+- Qwen3 query instructions apply only to query embeddings.
+- `ModelFamily` controls embedding formatting semantics and local reranker prompt formatting.
 
 ## Modules
 
 - `seasoning::embedding` for embeddings and retrieval formatting inputs
 - `seasoning::reranker` for reranking
 - `seasoning::reqwestx` for the rate-limited API client
-- `seasoning::config` for config structs (no I/O)
+- `seasoning::{AppConfig, Embedding, Reranker}` for config structs

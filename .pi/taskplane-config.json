@@ -52,7 +52,8 @@
       ]
     },
     "merge": {
-      "model": "",
+      "model": "openai-codex/gpt-5.4-mini",
+      "thinking": "high",
       "tools": "read,write,edit,bash,grep,find,ls",
       "verify": [
         "test -f .env.json || cp ${HOME}/github/casualjim/seasoning/.env.json .env.json",

@@ -16,11 +16,14 @@ use tokio::sync::oneshot;
 use crate::api::PreparedEmbeddingInput;
 use crate::{EmbedOutput, Error, ModelFamily, Result};
 
-const GEMMA_EMBEDDING_MODEL: &str =
+/// Example local GGUF model id for Gemma embeddings.
+pub const GEMMA_EMBEDDING_MODEL: &str =
     "hf:ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf";
-const QWEN3_EMBEDDING_MODEL: &str =
+/// Example local GGUF model id for Qwen3 embeddings.
+pub const QWEN3_EMBEDDING_MODEL: &str =
     "hf:Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf";
-const QWEN3_RERANKER_MODEL: &str =
+/// Example local GGUF model id for Qwen3 reranking.
+pub const QWEN3_RERANKER_MODEL: &str =
     "hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf";
 const SEASONING_HF_HUB_PROGRESS_ENV: &str = "SEASONING_HF_HUB_PROGRESS";
 const HF_HUB_DISABLE_PROGRESS_BARS_ENV: &str = "HF_HUB_DISABLE_PROGRESS_BARS";
@@ -61,32 +64,34 @@ struct LocalRerankerRuntime {
 
 impl LocalEmbeddingClient {
     pub(crate) fn new(model_family: ModelFamily, model: &str) -> Result<Self> {
-        validate_local_embedding_model(model_family, model)?;
-        let model_path = resolve_model_path(model)?;
+        let spec = parse_hf_model_spec(model)?;
         let (sender, receiver) = thread_mpsc::channel();
-        let (init_tx, init_rx) = thread_mpsc::sync_channel(1);
         let thread_name = format!("seasoning-embed-{}", model_family.as_str());
 
         thread::Builder::new()
             .name(thread_name)
-            .spawn(move || match LocalEmbeddingRuntime::new(model_path) {
-                Ok(mut runtime) => {
-                    let _ = init_tx.send(Ok(()));
-                    runtime.run(receiver);
-                }
-                Err(err) => {
-                    let _ = init_tx.send(Err(err));
+            .spawn(move || {
+                match resolve_model_path_from_spec(&spec).and_then(LocalEmbeddingRuntime::new) {
+                    Ok(mut runtime) => runtime.run(receiver),
+                    Err(error) => {
+                        let message = format!("{error}");
+                        for command in receiver {
+                            match command {
+                                EmbeddingCommand::Embed { response, .. } => {
+                                    let _ = response.send(Err(Error::LocalRuntime {
+                                        message: message.clone(),
+                                    }));
+                                }
+                            }
+                        }
+                    }
                 }
             })
             .map_err(|err| Error::LocalRuntime {
                 message: format!("failed to spawn local embedding worker: {err}"),
             })?;
 
-        match init_rx.recv() {
-            Ok(Ok(())) => Ok(Self { sender }),
-            Ok(Err(err)) => Err(err),
-            Err(_) => Err(Error::LocalRuntimeChannelClosed),
-        }
+        Ok(Self { sender })
     }
 
     pub(crate) async fn embed_prepared(
@@ -114,32 +119,34 @@ impl LocalEmbeddingClient {
 
 impl LocalRerankerClient {
     pub(crate) fn new(model_family: ModelFamily, model: &str) -> Result<Self> {
-        validate_local_reranker_model(model_family, model)?;
-        let model_path = resolve_model_path(model)?;
+        let spec = parse_hf_model_spec(model)?;
         let (sender, receiver) = thread_mpsc::channel();
-        let (init_tx, init_rx) = thread_mpsc::sync_channel(1);
         let thread_name = format!("seasoning-rerank-{}", model_family.as_str());
 
         thread::Builder::new()
             .name(thread_name)
-            .spawn(move || match LocalRerankerRuntime::new(model_path) {
-                Ok(mut runtime) => {
-                    let _ = init_tx.send(Ok(()));
-                    runtime.run(receiver);
-                }
-                Err(err) => {
-                    let _ = init_tx.send(Err(err));
+            .spawn(move || {
+                match resolve_model_path_from_spec(&spec).and_then(LocalRerankerRuntime::new) {
+                    Ok(mut runtime) => runtime.run(receiver),
+                    Err(error) => {
+                        let message = format!("{error}");
+                        for command in receiver {
+                            match command {
+                                RerankerCommand::Score { response, .. } => {
+                                    let _ = response.send(Err(Error::LocalRuntime {
+                                        message: message.clone(),
+                                    }));
+                                }
+                            }
+                        }
+                    }
                 }
             })
             .map_err(|err| Error::LocalRuntime {
                 message: format!("failed to spawn local reranker worker: {err}"),
             })?;
 
-        match init_rx.recv() {
-            Ok(Ok(())) => Ok(Self { sender }),
-            Ok(Err(err)) => Err(err),
-            Err(_) => Err(Error::LocalRuntimeChannelClosed),
-        }
+        Ok(Self { sender })
     }
 
     pub(crate) async fn score_texts(&self, texts: &[String]) -> Result<Vec<f64>> {
@@ -301,34 +308,14 @@ impl LocalRerankerRuntime {
     }
 }
 
-fn validate_local_embedding_model(model_family: ModelFamily, model: &str) -> Result<()> {
-    let supported = match model_family {
-        ModelFamily::Gemma => GEMMA_EMBEDDING_MODEL,
-        ModelFamily::Qwen3 => QWEN3_EMBEDDING_MODEL,
-    };
-
-    if model == supported {
-        Ok(())
-    } else {
-        Err(Error::UnsupportedLocalModel {
-            kind: "embedding",
-            model: model.to_string(),
-        })
-    }
+#[derive(Debug)]
+struct HuggingFaceModelSpec {
+    full_spec: String,
+    repo: String,
+    filename: String,
 }
 
-fn validate_local_reranker_model(model_family: ModelFamily, model: &str) -> Result<()> {
-    if model_family != ModelFamily::Qwen3 || model != QWEN3_RERANKER_MODEL {
-        return Err(Error::UnsupportedLocalModel {
-            kind: "reranking",
-            model: model.to_string(),
-        });
-    }
-
-    Ok(())
-}
-
-fn resolve_model_path(model: &str) -> Result<PathBuf> {
+fn parse_hf_model_spec(model: &str) -> Result<HuggingFaceModelSpec> {
     let Some(spec) = model.strip_prefix("hf:") else {
         return Err(Error::UnsupportedConfiguration {
             message: format!(
@@ -345,11 +332,28 @@ fn resolve_model_path(model: &str) -> Result<PathBuf> {
         });
     };
 
+    Ok(HuggingFaceModelSpec {
+        full_spec: model.to_string(),
+        repo: repo.to_string(),
+        filename: filename.to_string(),
+    })
+}
+
+#[cfg(test)]
+fn resolve_model_path(model: &str) -> Result<PathBuf> {
+    let spec = parse_hf_model_spec(model)?;
+    resolve_model_path_from_spec(&spec)
+}
+
+fn resolve_model_path_from_spec(spec: &HuggingFaceModelSpec) -> Result<PathBuf> {
     hugging_face_api()?
-        .model(repo.to_string())
-        .get(filename)
+        .model(spec.repo.clone())
+        .get(&spec.filename)
         .map_err(|err| Error::LocalRuntime {
-            message: format!("failed to resolve Hugging Face GGUF artifact '{model}': {err}"),
+            message: format!(
+                "failed to resolve Hugging Face GGUF artifact '{}': {err}",
+                spec.full_spec
+            ),
         })
 }
 
@@ -473,23 +477,29 @@ mod tests {
     use crate::reranker::{Client as RerankerClient, RerankerConfig};
     use crate::{
         EmbeddingInput, EmbeddingProvider, EmbeddingRole, RerankDocument, RerankQuery,
-        RerankingProvider,
+        RerankingProvider, Tokenizer,
     };
 
-    fn test_embedding_config(model_family: ModelFamily, model: &str) -> EmbedderConfig {
-        EmbedderConfig {
-            api_key: None,
-            base_url: String::new(),
-            timeout: Duration::from_secs(30),
-            dialect: crate::Dialect::LlamaCpp,
-            model_family,
-            model: model.to_string(),
-            query_instruction: None,
-            embedding_dim: 1,
-            requests_per_minute: 1000,
-            max_concurrent_requests: 1,
-            tokens_per_minute: 1_000_000,
+    fn tokenizer_for_model_spec(model: &str) -> Tokenizer {
+        let model_id = match model {
+            GEMMA_EMBEDDING_MODEL => "google/embeddinggemma-300m",
+            QWEN3_EMBEDDING_MODEL => "Qwen/Qwen3-Embedding-0.6B",
+            other => panic!("unsupported tokenizer mapping for model: {other}"),
+        };
+        let tokenizer = tokenizers::Tokenizer::from_pretrained(model_id, None).unwrap();
+        Tokenizer::HuggingFace {
+            model_id: model_id.to_string(),
+            tokenizer: std::sync::Arc::new(tokenizer),
         }
+    }
+
+    fn test_embedding_config(model_family: ModelFamily, model: &str) -> EmbedderConfig {
+        EmbedderConfig::local(
+            model_family,
+            tokenizer_for_model_spec(model),
+            model.to_string(),
+            None,
+        )
     }
 
     fn test_reranker_config(model: &str) -> RerankerConfig {
@@ -515,22 +525,17 @@ mod tests {
             .collect()
     }
 
-    fn token_count_for_text(model: &LlamaModel, text: &str) -> usize {
-        token_ids_for_text(model, text).len()
+    fn formatted_embedding_token_count(
+        model_family: ModelFamily,
+        tokenizer: &Tokenizer,
+        input: &EmbeddingInput,
+    ) -> usize {
+        let rendered = model_family.format_embedding_input(input, None);
+        tokenizer.prepare(&rendered).unwrap().token_count()
     }
 
-    fn prepare_semantic_inputs(
-        client: &EmbeddingClient,
-        tokenizer_model: &LlamaModel,
-        inputs: &[EmbeddingInput],
-    ) -> Vec<PreparedEmbeddingInput> {
-        client
-            .render_inputs(inputs)
-            .into_iter()
-            .map(|rendered| {
-                PreparedEmbeddingInput::new(token_ids_for_text(tokenizer_model, &rendered)).unwrap()
-            })
-            .collect()
+    fn token_count_for_text(model: &LlamaModel, text: &str) -> usize {
+        token_ids_for_text(model, text).len()
     }
 
     fn max_abs_diff(left: &[f32], right: &[f32]) -> f32 {
@@ -541,14 +546,9 @@ mod tests {
     }
 
     #[test]
-    fn embedding_allowlist_accepts_supported_models() {
-        assert!(validate_local_embedding_model(ModelFamily::Gemma, GEMMA_EMBEDDING_MODEL).is_ok());
-        assert!(validate_local_embedding_model(ModelFamily::Qwen3, QWEN3_EMBEDDING_MODEL).is_ok());
-    }
-
-    #[test]
-    fn reranker_allowlist_accepts_supported_model() {
-        assert!(validate_local_reranker_model(ModelFamily::Qwen3, QWEN3_RERANKER_MODEL).is_ok());
+    fn parse_hf_model_spec_rejects_non_hf_model_ids() {
+        let err = parse_hf_model_spec("example.gguf").unwrap_err();
+        assert!(matches!(err, Error::UnsupportedConfiguration { .. }));
     }
 
     #[test]
@@ -594,29 +594,55 @@ mod tests {
             (ModelFamily::Gemma, GEMMA_EMBEDDING_MODEL),
             (ModelFamily::Qwen3, QWEN3_EMBEDDING_MODEL),
         ] {
-            let tokenizer_model = load_model(&resolve_model_path(model_spec).unwrap()).unwrap();
+            let tokenizer = tokenizer_for_model_spec(model_spec);
             let client =
                 EmbeddingClient::new(test_embedding_config(model_family, model_spec)).unwrap();
+            let query_a = EmbeddingInput {
+                role: EmbeddingRole::Query,
+                text: "memory safety in rust".to_string(),
+                title: None,
+                token_count: 0,
+            };
+            let query_b = EmbeddingInput {
+                role: EmbeddingRole::Query,
+                text: "memory safety in rust".to_string(),
+                title: None,
+                token_count: 0,
+            };
+            let query_c = EmbeddingInput {
+                role: EmbeddingRole::Query,
+                text: "tropical fruit smoothie recipes".to_string(),
+                title: None,
+                token_count: 0,
+            };
             let semantic_inputs = vec![
                 EmbeddingInput {
-                    role: EmbeddingRole::Query,
-                    text: "memory safety in rust".to_string(),
-                    title: None,
+                    token_count: formatted_embedding_token_count(
+                        model_family,
+                        &tokenizer,
+                        &query_a,
+                    ),
+                    ..query_a
                 },
                 EmbeddingInput {
-                    role: EmbeddingRole::Query,
-                    text: "memory safety in rust".to_string(),
-                    title: None,
+                    token_count: formatted_embedding_token_count(
+                        model_family,
+                        &tokenizer,
+                        &query_b,
+                    ),
+                    ..query_b
                 },
                 EmbeddingInput {
-                    role: EmbeddingRole::Query,
-                    text: "tropical fruit smoothie recipes".to_string(),
-                    title: None,
+                    token_count: formatted_embedding_token_count(
+                        model_family,
+                        &tokenizer,
+                        &query_c,
+                    ),
+                    ..query_c
                 },
             ];
-            let prepared = prepare_semantic_inputs(&client, &tokenizer_model, &semantic_inputs);
 
-            let output = client.embed(&prepared).await.unwrap();
+            let output = client.embed(&semantic_inputs).await.unwrap();
 
             assert_eq!(
                 output.embeddings.len(),
@@ -687,6 +713,56 @@ mod tests {
         assert!(
             scores[0] > scores[2],
             "relevant document should outrank unrelated text: {scores:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn local_reranker_preserves_input_to_score_mapping() {
+        let tokenizer_model =
+            load_model(&resolve_model_path(QWEN3_RERANKER_MODEL).unwrap()).unwrap();
+        let client = RerankerClient::new(test_reranker_config(QWEN3_RERANKER_MODEL)).unwrap();
+        let query_text = "how does rust prevent data races";
+        let query = RerankQuery {
+            text: query_text.to_string(),
+            token_count: token_count_for_text(&tokenizer_model, query_text),
+        };
+
+        let doc_a = "Rust prevents data races with ownership and borrowing.";
+        let doc_b = "Ownership rules stop aliasing mutable state across threads.";
+        let doc_c = "Bananas are yellow fruit often blended into smoothies.";
+
+        let ordered = [doc_a, doc_b, doc_c]
+            .into_iter()
+            .map(|text| RerankDocument {
+                text: text.to_string(),
+                token_count: token_count_for_text(&tokenizer_model, text),
+            })
+            .collect::<Vec<_>>();
+        let permuted = [doc_c, doc_a, doc_b]
+            .into_iter()
+            .map(|text| RerankDocument {
+                text: text.to_string(),
+                token_count: token_count_for_text(&tokenizer_model, text),
+            })
+            .collect::<Vec<_>>();
+
+        let ordered_scores = client.rerank(&query, &ordered).await.unwrap();
+        let permuted_scores = client.rerank(&query, &permuted).await.unwrap();
+
+        assert_eq!(ordered_scores.len(), 3);
+        assert_eq!(permuted_scores.len(), 3);
+
+        assert!(
+            (ordered_scores[0] - permuted_scores[1]).abs() < 1e-6,
+            "doc_a score should follow doc_a across permutations: ordered={ordered_scores:?} permuted={permuted_scores:?}"
+        );
+        assert!(
+            (ordered_scores[1] - permuted_scores[2]).abs() < 1e-6,
+            "doc_b score should follow doc_b across permutations: ordered={ordered_scores:?} permuted={permuted_scores:?}"
+        );
+        assert!(
+            (ordered_scores[2] - permuted_scores[0]).abs() < 1e-6,
+            "doc_c score should follow doc_c across permutations: ordered={ordered_scores:?} permuted={permuted_scores:?}"
         );
     }
 }
