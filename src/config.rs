@@ -143,6 +143,8 @@ impl Reranker {
             requests_per_minute: self.requests_per_minute,
             max_concurrent_requests: self.max_concurrent_requests,
             tokens_per_minute: self.tokens_per_minute,
+            #[cfg(feature = "local")]
+            backend: None,
         })
     }
 }

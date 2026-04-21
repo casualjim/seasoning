@@ -51,6 +51,9 @@ use crate::reqwestx::{ApiClient, ApiClientConfig};
 use crate::{Dialect, Error, ModelFamily, Result};
 use crate::{RerankDocument, RerankQuery};
 
+#[cfg(feature = "local")]
+use std::sync::Arc;
+
 /// Configuration for the reranking client.
 #[derive(Debug, Clone)]
 pub struct RerankerConfig {
@@ -74,6 +77,12 @@ pub struct RerankerConfig {
     pub max_concurrent_requests: usize,
     /// Maximum number of tokens per minute.
     pub tokens_per_minute: u32,
+    /// Pre-initialized llama.cpp backend for local execution.
+    ///
+    /// If set, the client will use this backend instead of initializing one
+    /// internally. Allows sharing a single backend across clients.
+    #[cfg(feature = "local")]
+    pub backend: Option<Arc<llama_cpp_2::llama_backend::LlamaBackend>>,
 }
 
 /// Reranking client for remote APIs and local llama.cpp backends.
@@ -166,11 +175,16 @@ impl Client {
             Dialect::LlamaCpp => {
                 #[cfg(feature = "local")]
                 {
+                    let backend = match config.backend {
+                        Some(b) => b,
+                        None => Arc::new(crate::local::create_backend()?),
+                    };
                     Ok(Self {
                         #[cfg(feature = "local")]
                         model_family: config.model_family,
                         instruction: config.instruction,
                         backend: Backend::Local(LocalRerankerClient::new(
+                            backend,
                             config.model_family,
                             &config.model,
                         )?),
@@ -308,7 +322,7 @@ impl RerankingProvider for Client {
                         )
                     })
                     .collect::<Vec<_>>();
-                let scores = client.score_texts(&formatted).await?;
+                let scores = client.score_texts(formatted).await?;
                 ensure_score_count(scores.len(), documents.len())?;
                 Ok(scores)
             }
@@ -402,6 +416,8 @@ mod tests {
             requests_per_minute: 1000,
             max_concurrent_requests: 10,
             tokens_per_minute: 1_000_000,
+            #[cfg(feature = "local")]
+            backend: None,
         })
         .unwrap();
 
@@ -451,6 +467,8 @@ mod tests {
             requests_per_minute: 1000,
             max_concurrent_requests: 10,
             tokens_per_minute: 1_000_000,
+            #[cfg(feature = "local")]
+            backend: None,
         })
         .unwrap();
 
@@ -494,6 +512,8 @@ mod tests {
             requests_per_minute: 1000,
             max_concurrent_requests: 10,
             tokens_per_minute: 1_000_000,
+            #[cfg(feature = "local")]
+            backend: None,
         })
         .unwrap();
 
@@ -534,6 +554,8 @@ mod tests {
             requests_per_minute: 1000,
             max_concurrent_requests: 10,
             tokens_per_minute: 1_000_000,
+            #[cfg(feature = "local")]
+            backend: None,
         })
         .unwrap();
 
@@ -562,6 +584,8 @@ mod tests {
             requests_per_minute: 1000,
             max_concurrent_requests: 10,
             tokens_per_minute: 1_000_000,
+            #[cfg(feature = "local")]
+            backend: None,
         });
 
         assert!(result.is_ok());
@@ -582,6 +606,8 @@ mod tests {
             requests_per_minute: 1,
             max_concurrent_requests: 1,
             tokens_per_minute: 1,
+            #[cfg(feature = "local")]
+            backend: None,
         });
 
         assert!(matches!(result, Err(Error::LocalFeatureRequired { .. })));
@@ -638,6 +664,8 @@ mod tests {
             requests_per_minute: 1000,
             max_concurrent_requests: 10,
             tokens_per_minute: 1_000_000,
+            #[cfg(feature = "local")]
+            backend: None,
         })
         .unwrap();
 
@@ -702,6 +730,8 @@ mod tests {
             requests_per_minute: 1000,
             max_concurrent_requests: 10,
             tokens_per_minute: 1_000_000,
+            #[cfg(feature = "local")]
+            backend: None,
         })
         .unwrap();
 

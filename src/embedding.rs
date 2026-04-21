@@ -17,7 +17,7 @@
 //!     ModelFamily::Qwen3,
 //!     Tokenizer::Tiktoken {
 //!         encoding: "cl100k_base".to_string(),
-//!         tokenizer: Arc::new(tiktoken_rs::cl100k_base()?),
+//!         tokenizer: Arc::new(tiktoken_rs::cl100k_base().map_err(|e| seasoning::Error::InvalidConfiguration { message: e.to_string() })?),
 //!     },
 //!     "Qwen/Qwen3-Embedding-0.6B",
 //!     None,
@@ -100,6 +100,8 @@ pub struct EmbedderConfig {
     requests_per_minute: usize,
     max_concurrent_requests: usize,
     tokens_per_minute: u32,
+    #[cfg(feature = "local")]
+    backend: Option<std::sync::Arc<llama_cpp_2::llama_backend::LlamaBackend>>,
 }
 
 impl EmbedderConfig {
@@ -148,6 +150,8 @@ impl EmbedderConfig {
             requests_per_minute: remote.requests_per_minute,
             max_concurrent_requests: remote.max_concurrent_requests,
             tokens_per_minute: remote.tokens_per_minute,
+            #[cfg(feature = "local")]
+            backend: None,
         })
     }
 
@@ -172,7 +176,24 @@ impl EmbedderConfig {
             requests_per_minute: 0,
             max_concurrent_requests: 0,
             tokens_per_minute: 0,
+            #[cfg(feature = "local")]
+            backend: None,
         }
+    }
+
+    /// Provides a pre-initialized llama.cpp backend for local execution.
+    ///
+    /// If set, the client will use this backend instead of initializing one
+    /// internally. This allows sharing a single backend across multiple
+    /// embedding and reranking clients.
+    #[cfg(feature = "local")]
+    #[must_use]
+    pub fn with_backend(
+        mut self,
+        backend: std::sync::Arc<llama_cpp_2::llama_backend::LlamaBackend>,
+    ) -> Self {
+        self.backend = Some(backend);
+        self
     }
 
     /// Returns the configured execution dialect.
@@ -210,7 +231,7 @@ impl EmbedderConfig {
 trait EmbeddingBackend: Send + Sync {
     async fn embed_prepared(
         &self,
-        input: &[PreparedEmbeddingInput],
+        input: Vec<PreparedEmbeddingInput>,
         estimated_tokens: u32,
     ) -> Result<EmbedOutput>;
 }
@@ -257,7 +278,12 @@ impl Client {
             Dialect::LlamaCpp => {
                 #[cfg(feature = "local")]
                 {
+                    let backend = match config.backend {
+                        Some(b) => b,
+                        None => std::sync::Arc::new(crate::local::create_backend()?),
+                    };
                     Arc::new(LocalEmbeddingClient::new(
+                        backend,
                         config.model_family,
                         &config.model,
                     )?)
@@ -290,7 +316,7 @@ impl Client {
         let rendered = self
             .model_family
             .format_embedding_input(input, self.query_instruction.as_deref());
-        self.tokenizer.prepare(&rendered)
+        self.tokenizer.prepare(rendered)
     }
 
     fn prepare_inputs(&self, input: &[EmbeddingInput]) -> Result<Vec<PreparedEmbeddingInput>> {
@@ -325,19 +351,30 @@ impl RemoteClient {
 impl EmbeddingBackend for RemoteClient {
     async fn embed_prepared(
         &self,
-        input: &[PreparedEmbeddingInput],
+        input: Vec<PreparedEmbeddingInput>,
         estimated_tokens: u32,
     ) -> Result<EmbedOutput> {
-        if input.is_empty() {
+        let n = input.len();
+        if n == 0 {
             return Ok(EmbedOutput {
                 embeddings: Vec::new(),
             });
         }
 
         let payload = match self.dialect {
-            Dialect::OpenAI | Dialect::DeepInfra => {
+            Dialect::OpenAI => {
+                let ids: Vec<Vec<u32>> = input.into_iter().map(|p| p.token_ids).collect();
                 json!({
-                    "input": input.iter().map(PreparedEmbeddingInput::token_ids).collect::<Vec<_>>(),
+                    "input": ids,
+                    "model": self.model,
+                    "encoding_format": "float",
+                    "dimensions": self.dimension
+                })
+            }
+            Dialect::DeepInfra => {
+                let texts: Vec<String> = input.into_iter().map(|p| p.text).collect();
+                json!({
+                    "input": texts,
                     "model": self.model,
                     "encoding_format": "float",
                     "dimensions": self.dimension
@@ -351,7 +388,7 @@ impl EmbeddingBackend for RemoteClient {
             .post_json("/embeddings", &payload, estimated_tokens)
             .await?;
 
-        let embeddings = order_embeddings(response.data, input.len())?;
+        let embeddings = order_embeddings(response.data, n)?;
 
         Ok(EmbedOutput { embeddings })
     }
@@ -362,10 +399,11 @@ impl EmbeddingBackend for RemoteClient {
 impl EmbeddingBackend for LocalEmbeddingClient {
     async fn embed_prepared(
         &self,
-        input: &[PreparedEmbeddingInput],
+        input: Vec<PreparedEmbeddingInput>,
         _estimated_tokens: u32,
     ) -> Result<EmbedOutput> {
-        self.embed_prepared(input).await
+        let token_batches: Vec<Vec<u32>> = input.into_iter().map(|p| p.token_ids).collect();
+        self.embed_prepared(token_batches).await
     }
 }
 
@@ -431,7 +469,7 @@ impl EmbeddingProvider for Client {
         let estimated_tokens = Self::estimate_token_count(&prepared);
 
         self.backend
-            .embed_prepared(&prepared, estimated_tokens)
+            .embed_prepared(prepared, estimated_tokens)
             .await
     }
 }
@@ -480,7 +518,7 @@ mod tests {
     }
 
     fn token_ids(tokenizer: &Tokenizer, text: &str) -> Vec<u32> {
-        tokenizer.prepare(text).unwrap().token_ids().to_vec()
+        tokenizer.prepare(text.to_string()).unwrap().token_ids
     }
 
     fn semantic_input(text: &str, token_count: usize) -> EmbeddingInput {
@@ -561,19 +599,15 @@ mod tests {
         let mock_server = MockServer::start().await;
         let input = vec![semantic_input("retrieval query", 3)];
         let tokenizer = test_tokenizer();
-        let prepared = vec![token_ids(
-            &tokenizer,
-            &format!(
-                "Instruct: {}\nQuery: retrieval query",
-                ModelFamily::Qwen3.default_query_instruction()
-            ),
-        )];
 
         Mock::given(method("POST"))
             .and(path("/embeddings"))
             .and(header("Authorization", "Bearer test_key"))
             .and(body_json(json!({
-                "input": prepared,
+                "input": [format!(
+                    "Instruct: {}\nQuery: retrieval query",
+                    ModelFamily::Qwen3.default_query_instruction()
+                )],
                 "model": "test-model",
                 "encoding_format": "float",
                 "dimensions": 3
@@ -666,7 +700,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            prepared[0].token_ids(),
+            prepared[0].token_ids,
             token_ids(
                 &tokenizer,
                 "Instruct: custom instruction\nQuery: rust ownership"
@@ -778,5 +812,98 @@ mod tests {
                 inputs: 4
             }
         ));
+    }
+
+    fn live_remote_config() -> RemoteEmbedderConfig {
+        use std::env;
+        let api_key: String =
+            env::var("EMBEDDER_API_KEY").expect("EMBEDDER_API_KEY must be set for live API tests");
+        RemoteEmbedderConfig {
+            api_key: Some(SecretString::from(api_key)),
+            base_url: env::var("EMBEDDER_URL")
+                .unwrap_or_else(|_| "https://api.deepinfra.com/v1/openai".to_string()),
+            timeout: Duration::from_secs(30),
+            dialect: Dialect::DeepInfra,
+            embedding_dim: env::var("EMBEDDER_EMBEDDING_DIM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1024),
+            requests_per_minute: 1000,
+            max_concurrent_requests: 10,
+            tokens_per_minute: 1_000_000,
+        }
+    }
+
+    fn live_model() -> String {
+        std::env::var("EMBEDDER_MODEL").unwrap_or_else(|_| "Qwen/Qwen3-Embedding-0.6B".to_string())
+    }
+
+    fn live_client() -> Client {
+        let config = EmbedderConfig::remote(
+            ModelFamily::Qwen3,
+            Tokenizer::Tiktoken {
+                encoding: "cl100k_base".to_string(),
+                tokenizer: Arc::new(
+                    tiktoken_rs::cl100k_base()
+                        .map_err(|e| crate::Error::InvalidConfiguration {
+                            message: e.to_string(),
+                        })
+                        .unwrap(),
+                ),
+            },
+            live_model(),
+            None,
+            live_remote_config(),
+        )
+        .expect("config is valid");
+        Client::new(config).expect("client is valid")
+    }
+
+    #[tokio::test]
+    async fn live_deepinfra_embed_single_text() {
+        let client = live_client();
+
+        let output = client
+            .embed(&[EmbeddingInput {
+                role: EmbeddingRole::Document,
+                text: "Rust ownership prevents use-after-free bugs at compile time.".to_string(),
+                title: None,
+                token_count: 10,
+            }])
+            .await
+            .expect("embed request should succeed");
+
+        assert_eq!(output.embeddings.len(), 1);
+        assert_eq!(
+            output.embeddings[0].len(),
+            live_remote_config().embedding_dim
+        );
+    }
+
+    #[tokio::test]
+    async fn live_deepinfra_embed_batch() {
+        let client = live_client();
+
+        let inputs = vec![
+            EmbeddingInput {
+                role: EmbeddingRole::Query,
+                text: "What is Rust ownership?".to_string(),
+                title: None,
+                token_count: 5,
+            },
+            EmbeddingInput {
+                role: EmbeddingRole::Document,
+                text: "Ownership is Rust's most unique feature. It ensures memory safety without a garbage collector.".to_string(),
+                title: Some("Rust Book".to_string()),
+                token_count: 15,
+            },
+        ];
+
+        let output = client
+            .embed(&inputs)
+            .await
+            .expect("batch embed request should succeed");
+
+        assert_eq!(output.embeddings.len(), 2);
     }
 }

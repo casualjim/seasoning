@@ -33,7 +33,7 @@
 //!     ModelFamily::Qwen3,
 //!     Tokenizer::Tiktoken {
 //!         encoding: "cl100k_base".to_string(),
-//!         tokenizer: Arc::new(tiktoken_rs::cl100k_base()?),
+//!         tokenizer: Arc::new(tiktoken_rs::cl100k_base().map_err(|e| seasoning::Error::InvalidConfiguration { message: e.to_string() })?),
 //!     },
 //!     "Qwen/Qwen3-Embedding-0.6B",
 //!     None,
@@ -120,4 +120,6 @@ pub use config::{AppConfig, Embedding, Reranker};
 pub use error::{Error, Result};
 #[cfg(feature = "local")]
 #[doc(inline)]
-pub use local::{GEMMA_EMBEDDING_MODEL, QWEN3_EMBEDDING_MODEL, QWEN3_RERANKER_MODEL};
+pub use local::{
+    GEMMA_EMBEDDING_MODEL, QWEN3_EMBEDDING_MODEL, QWEN3_RERANKER_MODEL, create_backend,
+};

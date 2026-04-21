@@ -1,0 +1,6 @@
+creation_rules:
+  - path_regex: ".env.json"
+    age:
+      - age1p344ux7wu8rnrfu9faa99f8typl09g78ljam4c5lprrdk74yzdcsar5et0
+      - age1dym93tahjr0kt5cl79r8l0j2qk75gppwwp8u4wltqkgfp0x68gxsgr3jfl
+    kms: arn:aws:kms:us-west-2:880087769380:key/55535a25-24ba-401a-9194-06bf446862d8

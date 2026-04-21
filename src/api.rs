@@ -11,21 +11,17 @@ const DEFAULT_QWEN3_RETRIEVAL_INSTRUCTION: &str =
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PreparedEmbeddingInput {
-    token_ids: Vec<u32>,
+    pub(crate) token_ids: Vec<u32>,
+    pub(crate) text: String,
 }
 
 impl PreparedEmbeddingInput {
-    pub(crate) fn new(token_ids: Vec<u32>) -> Result<Self> {
+    pub(crate) fn new(token_ids: Vec<u32>, text: String) -> Result<Self> {
         if token_ids.is_empty() {
             return Err(Error::EmptyPreparedEmbeddingInput);
         }
 
-        Ok(Self { token_ids })
-    }
-
-    #[must_use]
-    pub(crate) fn token_ids(&self) -> &[u32] {
-        &self.token_ids
+        Ok(Self { token_ids, text })
     }
 
     #[must_use]
@@ -109,23 +105,23 @@ pub enum Tokenizer {
 }
 
 impl Tokenizer {
-    pub(crate) fn prepare(&self, text: &str) -> Result<PreparedEmbeddingInput> {
+    pub(crate) fn prepare(&self, text: String) -> Result<PreparedEmbeddingInput> {
         let token_ids = match self {
             Self::Characters => {
                 return Err(Error::InvalidConfiguration {
                     message: "embedding preparation requires a tokenizer that yields model token ids; the characters tokenizer only counts characters".to_string(),
                 });
             }
-            Self::Tiktoken { tokenizer, .. } => tokenizer.encode_ordinary(text),
+            Self::Tiktoken { tokenizer, .. } => tokenizer.encode_ordinary(&text),
             Self::HuggingFace { tokenizer, .. } => tokenizer
-                .encode(text, false)
+                .encode(text.as_str(), false)
                 .map(|encoding| encoding.get_ids().to_vec())
                 .map_err(|error| Error::InvalidConfiguration {
                     message: format!("failed to encode with HF tokenizer: {error}"),
                 })?,
         };
 
-        PreparedEmbeddingInput::new(token_ids)
+        PreparedEmbeddingInput::new(token_ids, text)
     }
 }
 
@@ -426,15 +422,15 @@ mod tests {
 
     #[test]
     fn prepared_embedding_input_rejects_empty_tokens() {
-        let err = PreparedEmbeddingInput::new(Vec::new()).unwrap_err();
+        let err = PreparedEmbeddingInput::new(Vec::new(), String::new()).unwrap_err();
         assert!(matches!(err, Error::EmptyPreparedEmbeddingInput));
     }
 
     #[test]
     fn prepared_embedding_input_reports_token_count() {
-        let input = PreparedEmbeddingInput::new(vec![1, 2, 3]).unwrap();
+        let input = PreparedEmbeddingInput::new(vec![1, 2, 3], "test".to_string()).unwrap();
         assert_eq!(input.token_count(), 3);
-        assert_eq!(input.token_ids(), &[1, 2, 3]);
+        assert_eq!(input.token_ids, &[1, 2, 3]);
     }
 
     #[test]

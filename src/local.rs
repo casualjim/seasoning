@@ -1,19 +1,29 @@
 use std::env::VarError;
+use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::Arc;
 use std::sync::mpsc as thread_mpsc;
 use std::thread;
+use std::time::Duration;
+
+/// Flash attention enabled policy constant.
+/// Corresponds to `llama_cpp_sys_2::LLAMA_FLASH_ATTN_TYPE_ENABLED`.
+const FLASH_ATTN_ENABLED: std::ffi::c_int = 1;
 
 use hf_hub::api::sync::{Api, ApiBuilder};
+use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::context::params::{LlamaContextParams, LlamaPoolingType};
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
 use llama_cpp_2::model::{AddBos, LlamaModel};
+use llama_cpp_2::send_logs_to_tracing;
 use llama_cpp_2::token::LlamaToken;
+use llama_cpp_2::{
+    LlamaBackendDevice, LlamaBackendDeviceType, LogOptions, list_llama_ggml_backend_devices,
+};
 use tokio::sync::oneshot;
 
-use crate::api::PreparedEmbeddingInput;
 use crate::{EmbedOutput, Error, ModelFamily, Result};
 
 /// Example local GGUF model id for Gemma embeddings.
@@ -25,10 +35,59 @@ pub const QWEN3_EMBEDDING_MODEL: &str =
 /// Example local GGUF model id for Qwen3 reranking.
 pub const QWEN3_RERANKER_MODEL: &str =
     "hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf";
+const SEASONING_LOCAL_DEBUG_ENV: &str = "SEASONING_LOCAL_DEBUG";
 const SEASONING_HF_HUB_PROGRESS_ENV: &str = "SEASONING_HF_HUB_PROGRESS";
 const HF_HUB_DISABLE_PROGRESS_BARS_ENV: &str = "HF_HUB_DISABLE_PROGRESS_BARS";
 
-static LLAMA_BACKEND: OnceLock<std::result::Result<LlamaBackend, String>> = OnceLock::new();
+/// Initialize the llama.cpp backend.
+///
+/// Convenience method for callers that don't need custom backend lifecycle management.
+/// The returned backend can be shared across multiple local embed/rerank clients via `Arc`.
+pub fn create_backend() -> Result<LlamaBackend> {
+    let debug = local_debug_enabled();
+    send_logs_to_tracing(LogOptions::default().with_logs_enabled(debug));
+    let backend = LlamaBackend::init().map_err(|err| Error::LocalRuntime {
+        message: format!("failed to initialize llama.cpp backend: {err}"),
+    })?;
+    if debug {
+        let devices = list_llama_ggml_backend_devices();
+        emit_backend_diagnostics(&devices);
+    }
+    Ok(backend)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LocalModelSelection {
+    selected_device_indices: Vec<usize>,
+    gpu_offload_enabled: bool,
+}
+
+impl LocalModelSelection {
+    fn from_devices(devices: &[LlamaBackendDevice]) -> Self {
+        let selected_device_indices = preferred_backend_device_indices(devices);
+        let gpu_offload_enabled = !selected_device_indices.is_empty();
+        Self {
+            selected_device_indices,
+            gpu_offload_enabled,
+        }
+    }
+
+    fn apply(&self, params: LlamaModelParams) -> Result<LlamaModelParams> {
+        if self.selected_device_indices.is_empty() {
+            return Ok(params);
+        }
+
+        params
+            .with_devices(&self.selected_device_indices)
+            .map(|params| params.with_n_gpu_layers(u32::MAX))
+            .map_err(|err| Error::LocalRuntime {
+                message: format!(
+                    "failed to configure llama.cpp GPU devices {:?}: {err}",
+                    self.selected_device_indices
+                ),
+            })
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct LocalEmbeddingClient {
@@ -63,16 +122,20 @@ struct LocalRerankerRuntime {
 }
 
 impl LocalEmbeddingClient {
-    pub(crate) fn new(model_family: ModelFamily, model: &str) -> Result<Self> {
+    pub(crate) fn new(
+        backend: Arc<LlamaBackend>,
+        model_family: ModelFamily,
+        model: &str,
+    ) -> Result<Self> {
         let spec = parse_hf_model_spec(model)?;
         let (sender, receiver) = thread_mpsc::channel();
         let thread_name = format!("seasoning-embed-{}", model_family.as_str());
 
         thread::Builder::new()
             .name(thread_name)
-            .spawn(move || {
-                match resolve_model_path_from_spec(&spec).and_then(LocalEmbeddingRuntime::new) {
-                    Ok(mut runtime) => runtime.run(receiver),
+            .spawn(move || match resolve_model_path_from_spec(&spec) {
+                Ok(path) => match LocalEmbeddingRuntime::new(&backend, path) {
+                    Ok(runtime) => runtime.run(&backend, receiver),
                     Err(error) => {
                         let message = format!("{error}");
                         for command in receiver {
@@ -85,6 +148,18 @@ impl LocalEmbeddingClient {
                             }
                         }
                     }
+                },
+                Err(error) => {
+                    let message = format!("{error}");
+                    for command in receiver {
+                        match command {
+                            EmbeddingCommand::Embed { response, .. } => {
+                                let _ = response.send(Err(Error::LocalRuntime {
+                                    message: message.clone(),
+                                }));
+                            }
+                        }
+                    }
                 }
             })
             .map_err(|err| Error::LocalRuntime {
@@ -94,15 +169,8 @@ impl LocalEmbeddingClient {
         Ok(Self { sender })
     }
 
-    pub(crate) async fn embed_prepared(
-        &self,
-        prepared: &[PreparedEmbeddingInput],
-    ) -> Result<EmbedOutput> {
-        let token_batches = prepared
-            .iter()
-            .map(|input| input.token_ids().to_vec())
-            .collect::<Vec<_>>();
-
+    pub(crate) async fn embed_prepared(&self, token_batches: Vec<Vec<u32>>) -> Result<EmbedOutput> {
+        let batch_count = token_batches.len();
         let (response_tx, response_rx) = oneshot::channel();
         self.sender
             .send(EmbeddingCommand::Embed {
@@ -111,23 +179,34 @@ impl LocalEmbeddingClient {
             })
             .map_err(|_| Error::LocalRuntimeChannelClosed)?;
 
-        response_rx
-            .await
-            .map_err(|_| Error::LocalRuntimeChannelClosed)?
+        match tokio::time::timeout(local_timeout(), response_rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(Error::LocalRuntimeChannelClosed),
+            Err(_) => Err(Error::LocalRuntime {
+                message: format!(
+                    "local embedding timed out after {}s (batch count: {batch_count})",
+                    local_timeout().as_secs(),
+                ),
+            }),
+        }
     }
 }
 
 impl LocalRerankerClient {
-    pub(crate) fn new(model_family: ModelFamily, model: &str) -> Result<Self> {
+    pub(crate) fn new(
+        backend: Arc<LlamaBackend>,
+        model_family: ModelFamily,
+        model: &str,
+    ) -> Result<Self> {
         let spec = parse_hf_model_spec(model)?;
         let (sender, receiver) = thread_mpsc::channel();
         let thread_name = format!("seasoning-rerank-{}", model_family.as_str());
 
         thread::Builder::new()
             .name(thread_name)
-            .spawn(move || {
-                match resolve_model_path_from_spec(&spec).and_then(LocalRerankerRuntime::new) {
-                    Ok(mut runtime) => runtime.run(receiver),
+            .spawn(move || match resolve_model_path_from_spec(&spec) {
+                Ok(path) => match LocalRerankerRuntime::new(&backend, path) {
+                    Ok(runtime) => runtime.run(&backend, receiver),
                     Err(error) => {
                         let message = format!("{error}");
                         for command in receiver {
@@ -140,6 +219,18 @@ impl LocalRerankerClient {
                             }
                         }
                     }
+                },
+                Err(error) => {
+                    let message = format!("{error}");
+                    for command in receiver {
+                        match command {
+                            RerankerCommand::Score { response, .. } => {
+                                let _ = response.send(Err(Error::LocalRuntime {
+                                    message: message.clone(),
+                                }));
+                            }
+                        }
+                    }
                 }
             })
             .map_err(|err| Error::LocalRuntime {
@@ -149,163 +240,216 @@ impl LocalRerankerClient {
         Ok(Self { sender })
     }
 
-    pub(crate) async fn score_texts(&self, texts: &[String]) -> Result<Vec<f64>> {
+    pub(crate) async fn score_texts(&self, texts: Vec<String>) -> Result<Vec<f64>> {
+        let text_count = texts.len();
         let (response_tx, response_rx) = oneshot::channel();
         self.sender
             .send(RerankerCommand::Score {
-                texts: texts.to_vec(),
+                texts,
                 response: response_tx,
             })
             .map_err(|_| Error::LocalRuntimeChannelClosed)?;
 
-        response_rx
-            .await
-            .map_err(|_| Error::LocalRuntimeChannelClosed)?
+        match tokio::time::timeout(local_timeout(), response_rx).await {
+            Ok(Ok(result)) => result,
+            Ok(Err(_)) => Err(Error::LocalRuntimeChannelClosed),
+            Err(_) => Err(Error::LocalRuntime {
+                message: format!(
+                    "local reranking timed out after {}s (text count: {text_count})",
+                    local_timeout().as_secs(),
+                ),
+            }),
+        }
     }
 }
 
 impl LocalEmbeddingRuntime {
-    fn new(model_path: PathBuf) -> Result<Self> {
-        let model = load_model(&model_path)?;
+    fn new(backend: &LlamaBackend, model_path: PathBuf) -> Result<Self> {
+        let model = load_model(backend, &model_path)?;
         Ok(Self { model })
     }
 
-    fn run(&mut self, receiver: thread_mpsc::Receiver<EmbeddingCommand>) {
+    fn run(self, backend: &LlamaBackend, receiver: thread_mpsc::Receiver<EmbeddingCommand>) {
+        let mut context = match self.model.new_context(backend, {
+            let n = 2048u32;
+            LlamaContextParams::default()
+                .with_embeddings(true)
+                .with_n_ctx(Some(
+                    NonZeroU32::new(n).expect("context size must be non-zero"),
+                ))
+                .with_n_batch(n)
+        }) {
+            Ok(ctx) => ctx,
+            Err(err) => {
+                let message = format!("failed to create llama.cpp embedding context: {err}");
+                for command in receiver {
+                    let EmbeddingCommand::Embed { response, .. } = command;
+                    let _ = response.send(Err(Error::LocalRuntime {
+                        message: message.clone(),
+                    }));
+                }
+                return;
+            }
+        };
+
         for command in receiver {
             match command {
                 EmbeddingCommand::Embed {
                     token_batches,
                     response,
                 } => {
-                    let _ = response.send(self.embed_token_batches(&token_batches));
+                    let _ = response.send(embed_token_batches(&mut context, &token_batches));
                 }
             }
         }
-    }
-
-    fn embed_token_batches(&mut self, token_batches: &[Vec<u32>]) -> Result<EmbedOutput> {
-        if token_batches.is_empty() {
-            return Ok(EmbedOutput {
-                embeddings: Vec::new(),
-            });
-        }
-
-        let mut token_sequences = Vec::with_capacity(token_batches.len());
-        for (index, token_ids) in token_batches.iter().enumerate() {
-            let tokens = token_ids_to_llama_tokens(token_ids, index)?;
-            let _ = i32::try_from(tokens.len()).map_err(|_| Error::InvalidConfiguration {
-                message: format!(
-                    "local embedding sequence {index} has {} tokens, which exceeds llama.cpp batch limits",
-                    tokens.len()
-                ),
-            })?;
-            token_sequences.push(tokens);
-        }
-
-        let mut context = self
-            .model
-            .new_context(
-                llama_backend()?,
-                LlamaContextParams::default().with_embeddings(true),
-            )
-            .map_err(|err| Error::LocalRuntime {
-                message: format!("failed to create llama.cpp embedding context: {err}"),
-            })?;
-
-        let mut embeddings = Vec::with_capacity(token_sequences.len());
-        for (index, tokens) in token_sequences.iter().enumerate() {
-            context.clear_kv_cache();
-            let mut batch = LlamaBatch::new(tokens.len(), 1);
-            batch
-                .add_sequence(tokens, 0, false)
-                .map_err(|err| Error::LocalRuntime {
-                    message: format!(
-                        "failed to prepare llama.cpp embedding batch sequence {index}: {err}"
-                    ),
-                })?;
-
-            context
-                .decode(&mut batch)
-                .map_err(|err| Error::LocalRuntime {
-                    message: format!(
-                        "llama.cpp embedding decode failed for sequence {index}: {err}"
-                    ),
-                })?;
-
-            let embedding = context
-                .embeddings_seq_ith(0)
-                .map_err(|err| Error::LocalRuntime {
-                    message: format!(
-                        "failed to read llama.cpp embedding output for sequence {index}: {err}"
-                    ),
-                })?;
-            embeddings.push(embedding.to_vec());
-        }
-
-        Ok(EmbedOutput { embeddings })
     }
 }
 
 impl LocalRerankerRuntime {
-    fn new(model_path: PathBuf) -> Result<Self> {
-        let model = load_model(&model_path)?;
+    fn new(backend: &LlamaBackend, model_path: PathBuf) -> Result<Self> {
+        let model = load_model(backend, &model_path)?;
         Ok(Self { model })
     }
 
-    fn run(&mut self, receiver: thread_mpsc::Receiver<RerankerCommand>) {
+    fn run(self, backend: &LlamaBackend, receiver: thread_mpsc::Receiver<RerankerCommand>) {
+        let n = 4096u32;
+        let params = LlamaContextParams::default()
+            .with_embeddings(true)
+            .with_pooling_type(LlamaPoolingType::Rank)
+            .with_n_ctx(Some(
+                NonZeroU32::new(n).expect("context size must be non-zero"),
+            ))
+            .with_n_batch(n)
+            .with_flash_attention_policy(FLASH_ATTN_ENABLED);
+        let mut context = match self.model.new_context(backend, params) {
+            Ok(ctx) => ctx,
+            Err(err) => {
+                let message = format!("failed to create llama.cpp reranker context: {err}");
+                for command in receiver {
+                    let RerankerCommand::Score { response, .. } = command;
+                    let _ = response.send(Err(Error::LocalRuntime {
+                        message: message.clone(),
+                    }));
+                }
+                return;
+            }
+        };
+
         for command in receiver {
             match command {
                 RerankerCommand::Score { texts, response } => {
-                    let _ = response.send(self.score_texts(&texts));
+                    let _ = response.send(score_texts(&self.model, &mut context, &texts));
                 }
             }
         }
     }
+}
 
-    fn score_texts(&mut self, texts: &[String]) -> Result<Vec<f64>> {
-        let mut scores = Vec::with_capacity(texts.len());
-        for text in texts {
-            scores.push(self.score_text(text)?);
-        }
-        Ok(scores)
+fn embed_token_batches(
+    context: &mut LlamaContext,
+    token_batches: &[Vec<u32>],
+) -> Result<EmbedOutput> {
+    if token_batches.is_empty() {
+        return Ok(EmbedOutput {
+            embeddings: Vec::new(),
+        });
     }
 
-    fn score_text(&mut self, text: &str) -> Result<f64> {
-        let tokens = tokenize_nonempty(&self.model, text)?;
-        let params = LlamaContextParams::default()
-            .with_embeddings(true)
-            .with_pooling_type(LlamaPoolingType::Rank);
-        let mut context = self
-            .model
-            .new_context(llama_backend()?, params)
-            .map_err(|err| Error::LocalRuntime {
-                message: format!("failed to create llama.cpp reranker context: {err}"),
-            })?;
+    let mut token_sequences = Vec::with_capacity(token_batches.len());
+    for (index, token_ids) in token_batches.iter().enumerate() {
+        let tokens = token_ids_to_llama_tokens(token_ids, index)?;
+        let _ = i32::try_from(tokens.len()).map_err(|_| Error::InvalidConfiguration {
+            message: format!(
+                "local embedding sequence {index} has {} tokens, which exceeds llama.cpp batch limits",
+                tokens.len()
+            ),
+        })?;
+        token_sequences.push(tokens);
+    }
+
+    let mut embeddings = Vec::with_capacity(token_sequences.len());
+    for (index, tokens) in token_sequences.iter().enumerate() {
+        tracing::debug!(
+            sequence = index,
+            total = token_sequences.len(),
+            token_count = tokens.len(),
+            "embedding decode start"
+        );
+        context.clear_kv_cache();
         let mut batch = LlamaBatch::new(tokens.len(), 1);
         batch
-            .add_sequence(&tokens, 0, false)
+            .add_sequence(tokens, 0, false)
             .map_err(|err| Error::LocalRuntime {
-                message: format!("failed to prepare llama.cpp reranker batch: {err}"),
+                message: format!(
+                    "failed to prepare llama.cpp embedding batch sequence {index}: {err}"
+                ),
             })?;
+
         context
             .decode(&mut batch)
             .map_err(|err| Error::LocalRuntime {
-                message: format!("llama.cpp reranker decode failed: {err}"),
-            })?;
-        let score = context
-            .embeddings_seq_ith(0)
-            .map_err(|err| Error::LocalRuntime {
-                message: format!("failed to read llama.cpp reranker score: {err}"),
+                message: format!("llama.cpp embedding decode failed for sequence {index}: {err}"),
             })?;
 
-        score
-            .first()
-            .copied()
-            .map(f64::from)
-            .ok_or_else(|| Error::LocalRuntime {
-                message: "llama.cpp reranker returned no score".to_string(),
-            })
+        let embedding = context
+            .embeddings_seq_ith(0)
+            .map_err(|err| Error::LocalRuntime {
+                message: format!(
+                    "failed to read llama.cpp embedding output for sequence {index}: {err}"
+                ),
+            })?;
+        embeddings.push(embedding.to_vec());
+        tracing::debug!(
+            sequence = index,
+            total = token_sequences.len(),
+            "embedding decode done"
+        );
     }
+
+    Ok(EmbedOutput { embeddings })
+}
+
+fn score_texts(
+    model: &LlamaModel,
+    context: &mut LlamaContext,
+    texts: &[String],
+) -> Result<Vec<f64>> {
+    let mut scores = Vec::with_capacity(texts.len());
+    for text in texts {
+        scores.push(score_text(model, context, text)?);
+    }
+    Ok(scores)
+}
+
+fn score_text(model: &LlamaModel, context: &mut LlamaContext, text: &str) -> Result<f64> {
+    let tokens = tokenize_nonempty(model, text)?;
+    tracing::debug!(token_count = tokens.len(), "reranker decode start");
+    context.clear_kv_cache();
+    let mut batch = LlamaBatch::new(tokens.len(), 1);
+    batch
+        .add_sequence(&tokens, 0, false)
+        .map_err(|err| Error::LocalRuntime {
+            message: format!("failed to prepare llama.cpp reranker batch: {err}"),
+        })?;
+    context
+        .decode(&mut batch)
+        .map_err(|err| Error::LocalRuntime {
+            message: format!("llama.cpp reranker decode failed: {err}"),
+        })?;
+    tracing::debug!(token_count = tokens.len(), "reranker decode done");
+    let score = context
+        .embeddings_seq_ith(0)
+        .map_err(|err| Error::LocalRuntime {
+            message: format!("failed to read llama.cpp reranker score: {err}"),
+        })?;
+
+    score
+        .first()
+        .copied()
+        .map(f64::from)
+        .ok_or_else(|| Error::LocalRuntime {
+            message: "llama.cpp reranker returned no score".to_string(),
+        })
 }
 
 #[derive(Debug)]
@@ -414,15 +558,42 @@ fn parse_bool_env_var(name: &'static str, value: &str) -> Result<bool> {
     }
 }
 
-fn load_model(model_path: &Path) -> Result<LlamaModel> {
-    LlamaModel::load_from_file(llama_backend()?, model_path, &LlamaModelParams::default()).map_err(
-        |err| Error::LocalRuntime {
-            message: format!(
-                "failed to load llama.cpp model from '{}': {err}",
-                model_path.display()
-            ),
-        },
-    )
+fn local_debug_enabled() -> bool {
+    std::env::var(SEASONING_LOCAL_DEBUG_ENV)
+        .ok()
+        .as_deref()
+        .map_or(false, |v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+}
+
+const SEASONING_LOCAL_TIMEOUT_ENV: &str = "SEASONING_LOCAL_TIMEOUT";
+const DEFAULT_LOCAL_TIMEOUT: Duration = Duration::from_secs(60);
+
+fn local_timeout() -> Duration {
+    std::env::var(SEASONING_LOCAL_TIMEOUT_ENV)
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map_or(DEFAULT_LOCAL_TIMEOUT, Duration::from_secs)
+}
+
+fn load_model(backend: &LlamaBackend, model_path: &Path) -> Result<LlamaModel> {
+    let devices = list_llama_ggml_backend_devices();
+    let selection = LocalModelSelection::from_devices(&devices);
+    if local_debug_enabled() {
+        emit_model_load_diagnostics(model_path, &selection, &devices);
+    }
+    let params = selection.apply(LlamaModelParams::default())?;
+
+    LlamaModel::load_from_file(backend, model_path, &params).map_err(|err| Error::LocalRuntime {
+        message: format!(
+            "failed to load llama.cpp model from '{}': {err}",
+            model_path.display()
+        ),
+    })
 }
 
 fn token_ids_to_llama_tokens(token_ids: &[u32], index: usize) -> Result<Vec<LlamaToken>> {
@@ -454,17 +625,110 @@ fn tokenize_nonempty(model: &LlamaModel, text: &str) -> Result<Vec<LlamaToken>> 
     Ok(tokens)
 }
 
-fn llama_backend() -> Result<&'static LlamaBackend> {
-    match LLAMA_BACKEND.get_or_init(|| {
-        let mut backend = LlamaBackend::init()
-            .map_err(|err| format!("failed to initialize llama.cpp backend: {err}"))?;
-        backend.void_logs();
-        Ok(backend)
-    }) {
-        Ok(backend) => Ok(backend),
-        Err(message) => Err(Error::LocalRuntime {
-            message: message.clone(),
-        }),
+fn preferred_backend_device_indices(devices: &[LlamaBackendDevice]) -> Vec<usize> {
+    devices
+        .iter()
+        .filter(|device| {
+            matches!(
+                device.device_type,
+                LlamaBackendDeviceType::Gpu
+                    | LlamaBackendDeviceType::IntegratedGpu
+                    | LlamaBackendDeviceType::Accelerator
+            )
+        })
+        .map(|device| device.index)
+        .collect()
+}
+
+fn emit_backend_diagnostics(devices: &[LlamaBackendDevice]) {
+    eprintln!("seasoning local: llama.cpp backend initialized");
+    if devices.is_empty() {
+        eprintln!("seasoning local: no ggml backend devices reported");
+        return;
+    }
+
+    for device in devices {
+        eprintln!(
+            "seasoning local: detected {}",
+            format_backend_device(device)
+        );
+    }
+}
+
+fn emit_model_load_diagnostics(
+    model_path: &Path,
+    selection: &LocalModelSelection,
+    devices: &[LlamaBackendDevice],
+) {
+    if selection.selected_device_indices.is_empty() {
+        eprintln!(
+            "seasoning local: loading '{}' with GPU offload disabled (no GPU/accelerator devices selected)",
+            model_path.display()
+        );
+        return;
+    }
+
+    let selected_devices = selection
+        .selected_device_indices
+        .iter()
+        .filter_map(|selected_index| {
+            devices
+                .iter()
+                .find(|device| device.index == *selected_index)
+        })
+        .map(format_backend_device)
+        .collect::<Vec<_>>()
+        .join(", ");
+    let gpu_offload = if selection.gpu_offload_enabled {
+        "all layers"
+    } else {
+        "disabled"
+    };
+
+    eprintln!(
+        "seasoning local: loading '{}' with GPU offload={} on {}",
+        model_path.display(),
+        gpu_offload,
+        selected_devices
+    );
+}
+
+fn format_backend_device(device: &LlamaBackendDevice) -> String {
+    format!(
+        "device #{} backend={} type={} name='{}' description='{}' memory_free={} memory_total={}",
+        device.index,
+        device.backend,
+        backend_device_type_name(device.device_type),
+        device.name,
+        device.description,
+        format_memory_bytes(device.memory_free),
+        format_memory_bytes(device.memory_total)
+    )
+}
+
+fn backend_device_type_name(device_type: LlamaBackendDeviceType) -> &'static str {
+    match device_type {
+        LlamaBackendDeviceType::Cpu => "cpu",
+        LlamaBackendDeviceType::Accelerator => "accelerator",
+        LlamaBackendDeviceType::Gpu => "gpu",
+        LlamaBackendDeviceType::IntegratedGpu => "integrated-gpu",
+        LlamaBackendDeviceType::Unknown => "unknown",
+    }
+}
+
+fn format_memory_bytes(bytes: usize) -> String {
+    const KIB: usize = 1024;
+    const MIB: usize = KIB * 1024;
+    const GIB: usize = MIB * 1024;
+
+    if bytes >= GIB {
+        format!("{:.1} GiB", bytes as f64 / GIB as f64)
+    } else if bytes >= MIB {
+        format!("{:.1} MiB", bytes as f64 / MIB as f64)
+    } else if bytes >= KIB {
+        format!("{:.1} KiB", bytes as f64 / KIB as f64)
+    } else {
+        format!("{bytes} B")
     }
 }
 
@@ -520,6 +784,7 @@ mod tests {
             requests_per_minute: 1000,
             max_concurrent_requests: 1,
             tokens_per_minute: 1_000_000,
+            backend: None,
         }
     }
 
@@ -537,7 +802,7 @@ mod tests {
         input: &EmbeddingInput,
     ) -> usize {
         let rendered = model_family.format_embedding_input(input, None);
-        tokenizer.prepare(&rendered).unwrap().token_count()
+        tokenizer.prepare(rendered).unwrap().token_count()
     }
 
     fn token_count_for_text(model: &LlamaModel, text: &str) -> usize {
@@ -592,6 +857,59 @@ mod tests {
         let err = resolve_hf_hub_progress_from_env_values(Some("maybe"), None).unwrap_err();
 
         assert!(matches!(err, Error::InvalidConfiguration { .. }));
+    }
+
+    fn backend_device(
+        index: usize,
+        backend: &str,
+        device_type: LlamaBackendDeviceType,
+    ) -> LlamaBackendDevice {
+        LlamaBackendDevice {
+            index,
+            name: format!("device-{index}"),
+            description: format!("{backend} device {index}"),
+            backend: backend.to_string(),
+            memory_total: 8 * 1024 * 1024 * 1024,
+            memory_free: 6 * 1024 * 1024 * 1024,
+            device_type,
+        }
+    }
+
+    #[test]
+    fn local_model_selection_prefers_non_cpu_devices() {
+        let devices = vec![
+            backend_device(0, "CPU", LlamaBackendDeviceType::Cpu),
+            backend_device(1, "Vulkan", LlamaBackendDeviceType::IntegratedGpu),
+            backend_device(2, "CUDA", LlamaBackendDeviceType::Gpu),
+        ];
+
+        let selection = LocalModelSelection::from_devices(&devices);
+
+        assert_eq!(selection.selected_device_indices, vec![1, 2]);
+        assert!(selection.gpu_offload_enabled);
+    }
+
+    #[test]
+    fn local_model_selection_falls_back_to_cpu_when_no_accelerator_exists() {
+        let devices = vec![backend_device(0, "CPU", LlamaBackendDeviceType::Cpu)];
+
+        let selection = LocalModelSelection::from_devices(&devices);
+
+        assert!(selection.selected_device_indices.is_empty());
+        assert!(!selection.gpu_offload_enabled);
+    }
+
+    #[test]
+    fn backend_device_format_includes_backend_type_and_memory() {
+        let device = backend_device(3, "Vulkan", LlamaBackendDeviceType::IntegratedGpu);
+
+        let formatted = format_backend_device(&device);
+
+        assert!(formatted.contains("device #3"));
+        assert!(formatted.contains("backend=Vulkan"));
+        assert!(formatted.contains("type=integrated-gpu"));
+        assert!(formatted.contains("memory_free=6.0 GiB"));
+        assert!(formatted.contains("memory_total=8.0 GiB"));
     }
 
     #[tokio::test]
@@ -702,9 +1020,12 @@ mod tests {
 
     #[tokio::test]
     async fn local_reranker_scores_supported_model_end_to_end() {
+        let backend = crate::local::create_backend().unwrap();
         let tokenizer_model =
-            load_model(&resolve_model_path(QWEN3_RERANKER_MODEL).unwrap()).unwrap();
-        let client = RerankerClient::new(test_reranker_config(QWEN3_RERANKER_MODEL)).unwrap();
+            load_model(&backend, &resolve_model_path(QWEN3_RERANKER_MODEL).unwrap()).unwrap();
+        let mut config = test_reranker_config(QWEN3_RERANKER_MODEL);
+        config.backend = Some(std::sync::Arc::new(backend));
+        let client = RerankerClient::new(config).unwrap();
         let query_text = "how does rust prevent data races";
         let query = RerankQuery {
             text: query_text.to_string(),
@@ -738,9 +1059,12 @@ mod tests {
 
     #[tokio::test]
     async fn local_reranker_preserves_input_to_score_mapping() {
+        let backend = crate::local::create_backend().unwrap();
         let tokenizer_model =
-            load_model(&resolve_model_path(QWEN3_RERANKER_MODEL).unwrap()).unwrap();
-        let client = RerankerClient::new(test_reranker_config(QWEN3_RERANKER_MODEL)).unwrap();
+            load_model(&backend, &resolve_model_path(QWEN3_RERANKER_MODEL).unwrap()).unwrap();
+        let mut config = test_reranker_config(QWEN3_RERANKER_MODEL);
+        config.backend = Some(std::sync::Arc::new(backend));
+        let client = RerankerClient::new(config).unwrap();
         let query_text = "how does rust prevent data races";
         let query = RerankQuery {
             text: query_text.to_string(),
