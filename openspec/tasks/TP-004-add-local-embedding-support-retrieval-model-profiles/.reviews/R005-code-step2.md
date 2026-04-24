@@ -15,4 +15,4 @@ None.
 - None blocking for Step 2. The required formatting, unsupported-local, and reranker correspondence/count coverage already exists elsewhere in the current test suite; this change correctly adds the missing config alias coverage from plan review R003.
 
 ### Suggestions
-- `mise test` currently fails in this review environment because `mise.toml` templates `EMBEDDER_API_KEY` from `env.DEEPINFRA_API_KEY`. Since Step 4 still requires repo gates, make sure the worker handles that environment prerequisite explicitly or documents the raw-command fallback already noted in `STATUS.md`.
+- `mise test` currently fails in this review environment because `mise.toml` templates `DEEPINFRA_API_KEY` from `env.DEEPINFRA_API_KEY`. Since Step 4 still requires repo gates, make sure the worker handles that environment prerequisite explicitly or documents the raw-command fallback already noted in `STATUS.md`.

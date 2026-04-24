@@ -11,5 +11,3 @@ rust = "latest"
 
 [env]
 _.file = ".env.json"
-EMBEDDER_API_KEY = "{{ env.DEEPINFRA_API_KEY }}"
-

@@ -816,8 +816,8 @@ mod tests {
 
     fn live_remote_config() -> RemoteEmbedderConfig {
         use std::env;
-        let api_key: String =
-            env::var("EMBEDDER_API_KEY").expect("EMBEDDER_API_KEY must be set for live API tests");
+        let api_key: String = env::var("DEEPINFRA_API_KEY")
+            .expect("DEEPINFRA_API_KEY must be set for live API tests");
         RemoteEmbedderConfig {
             api_key: Some(SecretString::from(api_key)),
             base_url: env::var("EMBEDDER_URL")
