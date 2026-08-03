@@ -10,7 +10,8 @@ use std::time::Duration;
 /// Corresponds to `llama_cpp_sys_2::LLAMA_FLASH_ATTN_TYPE_ENABLED`.
 const FLASH_ATTN_ENABLED: std::ffi::c_int = 1;
 
-use hf_hub::api::sync::{Api, ApiBuilder};
+use hf_hub::progress::{DownloadEvent, Progress, ProgressEvent, ProgressHandler};
+use hf_hub::{HFClientSync, split_id};
 use llama_cpp_2::context::LlamaContext;
 use llama_cpp_2::context::params::{LlamaContextParams, LlamaPoolingType};
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -490,9 +491,18 @@ fn resolve_model_path(model: &str) -> Result<PathBuf> {
 }
 
 fn resolve_model_path_from_spec(spec: &HuggingFaceModelSpec) -> Result<PathBuf> {
+    let progress_enabled = resolve_hf_hub_progress_enabled()?;
+    let (owner, name) = split_id(&spec.repo);
     hugging_face_api()?
-        .model(spec.repo.clone())
-        .get(&spec.filename)
+        .model(owner, name)
+        .download_file()
+        .filename(spec.filename.clone())
+        .maybe_progress(if progress_enabled {
+            Some(Progress::new(TracingProgress))
+        } else {
+            None
+        })
+        .send()
         .map_err(|err| Error::LocalRuntime {
             message: format!(
                 "failed to resolve Hugging Face GGUF artifact '{}': {err}",
@@ -501,15 +511,54 @@ fn resolve_model_path_from_spec(spec: &HuggingFaceModelSpec) -> Result<PathBuf> 
         })
 }
 
-fn hugging_face_api() -> Result<Api> {
-    let progress = resolve_hf_hub_progress_enabled()?;
+fn hugging_face_api() -> Result<HFClientSync> {
+    HFClientSync::new().map_err(|err| Error::LocalRuntime {
+        message: format!("failed to initialize hf-hub client: {err}"),
+    })
+}
 
-    ApiBuilder::new()
-        .with_progress(progress)
-        .build()
-        .map_err(|err| Error::LocalRuntime {
-            message: format!("failed to initialize hf-hub client: {err}"),
-        })
+/// `hf_hub::ProgressHandler` that surfaces download progress through `tracing`.
+///
+/// Replaces the built-in progress bar removed in hf-hub 1.0; only download
+/// events are observed, upload events are ignored.
+struct TracingProgress;
+
+impl ProgressHandler for TracingProgress {
+    fn on_progress(&self, event: &ProgressEvent) {
+        match event {
+            ProgressEvent::Download(DownloadEvent::Start {
+                total_files,
+                total_bytes,
+            }) => tracing::info!(
+                total_files = *total_files,
+                total_bytes = *total_bytes,
+                "downloading Hugging Face artifact"
+            ),
+            ProgressEvent::Download(DownloadEvent::Progress { files }) => {
+                for file in files {
+                    tracing::debug!(
+                        file = %file.filename,
+                        bytes_completed = file.bytes_completed,
+                        total_bytes = file.total_bytes,
+                        "hf-hub download progress"
+                    );
+                }
+            }
+            ProgressEvent::Download(DownloadEvent::AggregateProgress {
+                bytes_completed,
+                total_bytes,
+                ..
+            }) => tracing::debug!(
+                bytes_completed = *bytes_completed,
+                total_bytes = *total_bytes,
+                "hf-hub aggregate download progress"
+            ),
+            ProgressEvent::Download(DownloadEvent::Complete) => {
+                tracing::debug!("hf-hub download complete");
+            }
+            ProgressEvent::Upload(_) => {}
+        }
+    }
 }
 
 fn resolve_hf_hub_progress_enabled() -> Result<bool> {
